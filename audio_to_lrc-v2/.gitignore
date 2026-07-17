@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 模型缓存（Whisper/Demucs 下载的模型文件）
+*.pt
+*.bin
+*.onnx
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+
+# pytest
+.pytest_cache/

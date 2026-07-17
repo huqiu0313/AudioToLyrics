@@ -1,0 +1,7 @@
+customtkinter
+demucs
+faster-whisper
+syncedlyrics
+mutagen
+requests
+zhconv
