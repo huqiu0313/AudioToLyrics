@@ -1,0 +1,22 @@
+name: Local Config 1
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Qwen Chat
+    provider: openai
+    model: qwen3.7-plus
+    apiBase: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: sk-ws-H.RPIELIY.jhTu.MEYCIQCuWnqLbSCnUUMLp7bIzoNWlA2-5M6RspjYylTIlgP24AIhAN7Pbup5Te5YXPIcZHtZFyOEyL4hy1VLdJRW1Rgf5a-E
+    roles:
+      - chat
+      - edit
+      - apply
+
+  - name: Qwen Autocomplete
+    provider: openai
+    model: qwen3.7-plus
+    apiBase: https://dashscope.aliyuncs.com/compatible-mode/v1
+    apiKey: sk-ws-H.RPIELIY.jhTu.MEYCIQCuWnqLbSCnUUMLp7bIzoNWlA2-5M6RspjYylTIlgP24AIhAN7Pbup5Te5YXPIcZHtZFyOEyL4hy1VLdJRW1Rgf5a-E
+    roles:
+      - autocomplete

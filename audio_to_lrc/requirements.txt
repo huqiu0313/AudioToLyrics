@@ -1,0 +1,14 @@
+# 核心依赖
+faster-whisper>=0.10.0
+demucs>=4.0.0
+librosa>=0.10.0
+soundfile>=0.12.0
+zhconv>=1.4.3
+
+# PyTorch（根据你的 CUDA 版本选择）
+# CPU 版本：
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# GPU 版本（需要 CUDA）：
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
