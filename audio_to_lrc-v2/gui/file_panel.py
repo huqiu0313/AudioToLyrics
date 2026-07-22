@@ -1,4 +1,4 @@
-"""文件选择面板：添加/删除音频文件，展示待处理文件列表"""
+"""文件选择面板：添加/删除音视频文件，展示待处理文件列表"""
 
 import os
 from pathlib import Path
@@ -7,7 +7,7 @@ from tkinter import filedialog
 import customtkinter as ctk
 
 from gui import styles as S
-from config import SUPPORTED_FORMATS
+from config import SUPPORTED_MEDIA_FORMATS
 
 
 class FilePanel(ctk.CTkFrame):
@@ -123,8 +123,8 @@ class FilePanel(ctk.CTkFrame):
     # ── 事件处理 ──────────────────────────────────────────────────────────────
 
     def _add_files(self) -> None:
-        filetypes = [(f"音频文件 ({' '.join(SUPPORTED_FORMATS)})", " ".join(f"*{e}" for e in SUPPORTED_FORMATS))]
-        paths = filedialog.askopenfilenames(title="选择音频文件", filetypes=filetypes)
+        filetypes = [(f"音视频文件 ({' '.join(SUPPORTED_MEDIA_FORMATS)})", " ".join(f"*{e}" for e in SUPPORTED_MEDIA_FORMATS))]
+        paths = filedialog.askopenfilenames(title="选择音视频文件", filetypes=filetypes)
         for p in paths:
             if p and p not in self._files:
                 self._files.append(p)
@@ -136,7 +136,7 @@ class FilePanel(ctk.CTkFrame):
             return
         for root, _, files in os.walk(folder):
             for name in files:
-                if Path(name).suffix.lower() in SUPPORTED_FORMATS:
+                if Path(name).suffix.lower() in SUPPORTED_MEDIA_FORMATS:
                     full = os.path.join(root, name)
                     if full not in self._files:
                         self._files.append(full)

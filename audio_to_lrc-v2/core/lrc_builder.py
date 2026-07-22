@@ -27,7 +27,7 @@ def build_lrc_from_whisper(
         lines.append(f"[ti:{title}]")
     if artist:
         lines.append(f"[ar:{artist}]")
-    lines.append("[by:AudioToLyrics v2 (Whisper)]")
+    lines.append("[by:AudioToLyrics]")
     lines.append("")
 
     # 歌词行（带时间戳）

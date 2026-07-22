@@ -5,3 +5,4 @@ syncedlyrics
 mutagen
 requests
 zhconv
+imageio-ffmpeg

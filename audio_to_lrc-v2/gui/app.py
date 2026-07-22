@@ -40,7 +40,7 @@ class App(ctk.CTk):
         title_frame.pack(fill="x", padx=pad, pady=(pad, 0))
         ctk.CTkLabel(
             title_frame,
-            text="🎵 AudioToLyrics v3",
+            text="🎵 AudioToLyrics v4",
             font=S.get_font_title(),
             text_color=S.FG_PRIMARY,
         ).pack(side="left")
