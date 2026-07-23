@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
+audio_to_lrc/
 # 虚拟环境
 venv/
 .venv/
