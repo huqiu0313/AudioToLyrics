@@ -8,7 +8,7 @@ audio_to_lrc/
 venv/
 .venv/
 env/
-
+.continue/
 # IDE
 .vscode/
 .idea/
