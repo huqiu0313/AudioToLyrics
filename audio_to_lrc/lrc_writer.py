@@ -6,6 +6,7 @@ import os
 import logging
 
 from utils import format_lrc_time
+from lyric_breaks import split_lyrics_by_rhythm
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +34,13 @@ def save_lrc(lyrics: list[tuple[float, float, str]],
     lrc_path = f"{base}.lrc"
 
     try:
+        broken_lyrics = split_lyrics_by_rhythm(lyrics)
         with open(lrc_path, 'w', encoding='utf-8') as f:
             # 写入 LRC 头部元信息
             f.write("[ti:]\n[ar:]\n[al:]\n[by:AudioToLRC GUI]\n[offset:0]\n\n")
 
             # 写入歌词行
-            for start, end, text in lyrics:
+            for start, end, text in broken_lyrics:
                 time_tag = format_lrc_time(start)
                 f.write(f"{time_tag}{text}\n")
 
@@ -46,7 +48,7 @@ def save_lrc(lyrics: list[tuple[float, float, str]],
 
         # 预览前几行
         _log("\n--- 预览 ---")
-        for start, end, text in lyrics[:8]:
+        for start, end, text in broken_lyrics[:8]:
             time_tag = format_lrc_time(start)
             _log(f"{time_tag} {text}")
 

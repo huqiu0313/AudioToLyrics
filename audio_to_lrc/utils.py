@@ -21,14 +21,11 @@ def detect_device() -> tuple[str, str]:
 
 
 def clean_lyric_text(text: str) -> str:
-    """
-    清洗单条歌词文本：
-    - 移除音乐符号 emoji
-    - 移除书名号等无关标点
-    - 合并连续空白
-    """
+    """清洗单条歌词文本，保留较干净的内容。"""
     text = re.sub(r'[♪♫♬♩🎵🎶🎤🎧]', '', text)
-    text = re.sub(r'[【】〈〉《》「」『』]', '', text)
+    text = re.sub(r'[【】〈〉《》「」『』\[\](){}<>]', '', text)
+    text = text.replace(',', ' ')
+    text = re.sub(r'[。！？；：，.!?;:]', '', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 

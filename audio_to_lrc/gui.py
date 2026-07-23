@@ -20,6 +20,8 @@ from utils import detect_device
 from recognizer import WhisperRecognizer
 from separator import separate_vocals, is_demucs_available
 from lrc_writer import save_lrc, save_empty_lrc
+from aligner import align_lyrics_to_audio
+from web_search import fetch_official_lyrics
 
 
 class App:
@@ -35,8 +37,7 @@ class App:
         self.audio_path = tk.StringVar()
         self.model_var = tk.StringVar(value=DEFAULT_MODEL)
         self.lang_var = tk.StringVar(value=DEFAULT_LANGUAGE)
-        self.separate_var = tk.BooleanVar(value=True)
-        self.simplified_var = tk.BooleanVar(value=True)
+        self.search_var = tk.BooleanVar(value=True)
         self.running = False
         self.log_queue: queue.Queue[str] = queue.Queue()
 
@@ -56,27 +57,33 @@ class App:
 
     def _setup_ui(self):
         # 标题
+        self.root.configure(bg="#f3f6ff")
+        title_bar = tk.Frame(self.root, bg="#f3f6ff")
+        title_bar.pack(fill=tk.X, padx=0, pady=(0, 8))
         tk.Label(
-            self.root, text=APP_TITLE,
-            font=("Microsoft YaHei", 18, "bold")
-        ).pack(pady=10)
+            title_bar, text=APP_TITLE,
+            font=("Microsoft YaHei", 18, "bold"), bg="#f3f6ff", fg="#1f2937"
+        ).pack(pady=(10, 2))
 
         tk.Label(
-            self.root, text=APP_SUBTITLE,
-            font=("Microsoft YaHei", 10), fg="gray"
-        ).pack()
+            title_bar, text=APP_SUBTITLE,
+            font=("Microsoft YaHei", 10), fg="#6b7280", bg="#f3f6ff"
+        ).pack(pady=(0, 8))
 
         # ── 文件选择 ──────────────────────────────────────
         frame_file = tk.LabelFrame(self.root, text="📂 选择音频文件", padx=10, pady=10)
         frame_file.pack(fill=tk.X, padx=20, pady=10)
+        frame_file.configure(bg="#ffffff", fg="#374151", borderwidth=1, relief=tk.GROOVE)
 
-        tk.Entry(frame_file, textvariable=self.audio_path, width=50).pack(
+        tk.Entry(frame_file, textvariable=self.audio_path, width=50, bg="#f9fbff").pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        tk.Button(frame_file, text="浏览", command=self._select_file, width=8).pack(side=tk.RIGHT)
+        tk.Button(frame_file, text="浏览", command=self._select_file, width=8,
+                  bg="#5b7cff", fg="white", relief=tk.RAISED).pack(side=tk.RIGHT)
 
         # ── 设置区域 ──────────────────────────────────────
         frame_settings = tk.LabelFrame(self.root, text="⚙️ 设置", padx=10, pady=10)
         frame_settings.pack(fill=tk.X, padx=20, pady=5)
+        frame_settings.configure(bg="#ffffff", fg="#374151", borderwidth=1, relief=tk.GROOVE)
 
         # 设备信息
         device_label = f"{self.device} ({self.device_name})" if self.device == "cuda" else "CPU"
@@ -90,7 +97,7 @@ class App:
             frame_settings, textvariable=self.model_var,
             values=AVAILABLE_MODELS, state="readonly", width=15
         ).grid(row=1, column=1, sticky=tk.W, padx=10)
-        tk.Label(frame_settings, text="(small 推荐，越大越准但越慢)",
+        tk.Label(frame_settings, text="(medium 推荐，越大越准但越慢)",
                  font=("Microsoft YaHei", 9), fg="gray").grid(row=1, column=2, sticky=tk.W)
 
         # 语言选择
@@ -103,31 +110,19 @@ class App:
         lang_combo.set(DEFAULT_LANGUAGE)
         lang_combo.grid(row=2, column=1, sticky=tk.W, padx=10)
 
-        # 人声分离
-        self.separate_check = tk.Checkbutton(
-            frame_settings, text="启用人声分离 (推荐 - 大幅提高准确率)",
-            variable=self.separate_var)
-        self.separate_check.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=3)
-
-        # 简繁转换
-        self.simplified_check = tk.Checkbutton(
-            frame_settings, text="输出简体中文 (取消勾选则保留原始输出)",
-            variable=self.simplified_var)
-        self.simplified_check.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=2)
-
-        # ── 进度条 ────────────────────────────────────────
-        frame_progress = tk.LabelFrame(self.root, text="📊 进度", padx=10, pady=10)
-        frame_progress.pack(fill=tk.X, padx=20, pady=5)
-
-        self.progress = ttk.Progressbar(frame_progress, mode='indeterminate')
-        self.progress.pack(fill=tk.X, pady=5)
+        self.search_check = tk.Checkbutton(
+            frame_settings,
+            text="联网搜索官方歌词文本并对齐时间戳", 
+            variable=self.search_var)
+        self.search_check.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=2)
 
         # ── 日志输出 ──────────────────────────────────────
         frame_log = tk.LabelFrame(self.root, text="📝 日志", padx=10, pady=10)
         frame_log.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+        frame_log.configure(bg="#ffffff", fg="#374151", borderwidth=1, relief=tk.GROOVE)
 
         self.log_text = tk.Text(frame_log, height=10, wrap=tk.WORD,
-                                font=("Consolas", 10))
+                                font=("Consolas", 10), bg="#fbfcff")
         self.log_text.pack(fill=tk.BOTH, expand=True)
         scroll = tk.Scrollbar(self.log_text)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -142,12 +137,13 @@ class App:
             frame_button, text="▶️ 开始识别",
             command=self._start_recognition,
             font=("Microsoft YaHei", 12, "bold"),
-            bg="#4CAF50", fg="white", width=15, height=1)
+            bg="#4CAF50", fg="white", width=16, height=1, relief=tk.RAISED,
+            activebackground="#43a047")
         self.start_btn.pack(side=tk.LEFT, padx=5)
 
         tk.Button(
             frame_button, text="❌ 退出", command=self.root.quit,
-            font=("Microsoft YaHei", 10), width=10
+            font=("Microsoft YaHei", 10), width=10, bg="#f4f4f5", relief=tk.RAISED
         ).pack(side=tk.LEFT, padx=5)
 
         # ── 状态栏 ────────────────────────────────────────
@@ -229,14 +225,12 @@ class App:
 
         self.running = True
         self.start_btn.config(state=tk.DISABLED, text="⏳ 识别中...")
-        self.progress.start()
         self.status_var.set("正在运行...")
 
         # 在后台线程中运行，避免 GUI 卡死
         t = threading.Thread(
             target=self._run_recognition,
-            args=(audio_path, model_size, lang,
-                  self.separate_var.get(), self.simplified_var.get()),
+            args=(audio_path, model_size, lang, True, self.search_var.get()),
             daemon=True
         )
         t.start()
@@ -245,12 +239,13 @@ class App:
         self._poll_log_queue()
 
     def _run_recognition(self, audio_path: str, model_size: str,
-                         lang: str | None, separate: bool, simplified: bool):
+                         lang: str | None, separate: bool,
+                         use_search: bool):
         """后台线程：执行完整的识别流程"""
         try:
             self._enqueue_log(f"🚀 开始处理: {os.path.basename(audio_path)}")
 
-            # ── 1. 人声分离 ───────────────────────────────
+            # ── 1. 人声分离（默认开启）──────────────────────
             vocal_file = None
             if separate:
                 if is_demucs_available():
@@ -258,19 +253,34 @@ class App:
                         audio_path, device=self.device, log_callback=self._enqueue_log)
                 else:
                     self._enqueue_log("⚠️ demucs 未安装，跳过人声分离")
-
             target = vocal_file if vocal_file else audio_path
 
             # ── 2. Whisper 识别（模型缓存复用）────────────
             recognizer = self._get_or_create_recognizer(model_size)
             lyrics = recognizer.transcribe(target, language=lang)
 
-            # ── 3. 简繁转换 ───────────────────────────────
-            if lang == 'zh' and simplified:
+            # ── 3. 搜索官方歌词并对齐时间戳 ─────────────────
+            if use_search and lyrics:
+                try:
+                    text_lines = [text for _, _, text in lyrics]
+                    query = " ".join(text_lines[:8])
+                    official_lines = fetch_official_lyrics(query)
+                    if official_lines:
+                        lyrics = align_lyrics_to_audio(lyrics, official_lines)
+                        self._enqueue_log("   🌐 已获取官方歌词文本并完成时间对齐")
+                    else:
+                        self._enqueue_log("   ⚠️ 未获取到可用的官方歌词文本")
+                except Exception as exc:
+                    self._enqueue_log(f"   ⚠️ 官方歌词对齐失败: {exc}")
+            elif use_search and not lyrics:
+                self._enqueue_log("   ℹ️ 未进行官方歌词对齐，因为当前没有识别到歌词")
+
+            # ── 4. 简繁转换 ───────────────────────────────
+            if lang == 'zh':
                 lyrics = [(s, e, zhconv.convert(t, 'zh-cn')) for s, e, t in lyrics]
                 self._enqueue_log("   🔄 已转换为简体中文")
 
-            # ── 4. 保存 LRC ───────────────────────────────
+            # ── 5. 保存 LRC ───────────────────────────────
             if not lyrics:
                 self._enqueue_log("\n⚠️ 没有识别到歌词！可能是纯音乐或人声不清晰。")
                 save_empty_lrc(audio_path, log_callback=self._enqueue_log)
@@ -338,7 +348,6 @@ class App:
                 if msg == "DONE":
                     self.running = False
                     self.start_btn.config(state=tk.NORMAL, text="▶️ 开始识别")
-                    self.progress.stop()
                     self.status_var.set("就绪")
                     return
                 self._log(msg)

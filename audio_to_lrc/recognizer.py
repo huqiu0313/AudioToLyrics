@@ -3,11 +3,23 @@ Whisper 语音识别模块
 支持模型缓存复用、GPU/CPU 自动切换
 """
 
+from __future__ import annotations
+
 import os
 import logging
+from typing import TYPE_CHECKING
 
-from config import TARGET_SAMPLE_RATE, LRC_MIN_TEXT_LENGTH, DEVICE_COMPUTE_MAP
+from config import (
+    TARGET_SAMPLE_RATE,
+    LRC_MIN_TEXT_LENGTH,
+    DEVICE_COMPUTE_MAP,
+    WHISPER_PROMPTS,
+    DEFAULT_WHISPER_PROMPT,
+)
 from utils import clean_lyric_text, detect_device
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +40,8 @@ class WhisperRecognizer:
         """
         self.log_callback = log_callback
         self.model_size = model_size
-        self.model = None
+
+        self.model: "WhisperModel | None" = None
 
         # 自动检测设备
         if device is None:
@@ -62,25 +75,21 @@ class WhisperRecognizer:
         )
         self._log("   ✅ 模型就绪")
 
+    def _get_initial_prompt(self, language: str | None) -> str:
+        if language:
+            lang = language.lower()
+            if lang in WHISPER_PROMPTS:
+                return WHISPER_PROMPTS[lang]
+        return DEFAULT_WHISPER_PROMPT
+
     def transcribe(self, audio_path: str, language: str | None = None) -> list[tuple[float, float, str]]:
-        """
-        转录音频文件，返回歌词列表。
-
-        Args:
-            audio_path: 音频文件路径
-            language: 语言代码，None 表示自动检测
-
-        Returns:
-            [(start, end, text), ...] 格式的歌词列表
-        """
+        """转录音频文件并返回歌词列表。"""
         if self.model is None:
             self.load_model()
 
-        assert self.model is not None  # 类型守卫
+        assert self.model is not None
 
         self._log("   开始转录...")
-
-        # 转换为 WAV（如果不是 WAV 格式）
         target_path = audio_path
         temp_wav = None
         if not audio_path.lower().endswith('.wav'):
@@ -91,20 +100,22 @@ class WhisperRecognizer:
                 target_path,
                 language=language,
                 beam_size=5,
+                best_of=5,
+                patience=1.0,
+                condition_on_previous_text=True,
+                initial_prompt=self._get_initial_prompt(language),
                 vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=150, threshold=0.3),
-                no_speech_threshold=0.5
+                vad_parameters=dict(min_silence_duration_ms=300, threshold=0.3, speech_pad_ms=200),
+                no_speech_threshold=0.4,
+                log_prob_threshold=-0.8,
             )
 
-            self._log(f"   📊 检测语言: {info.language} "
-                      f"(置信度: {info.language_probability:.0%})")
-
-            lyrics = []
-            for seg in segments:
-                text = clean_lyric_text(seg.text)
-                if text and len(text) >= LRC_MIN_TEXT_LENGTH:
-                    lyrics.append((seg.start, seg.end, text))
-
+            self._log(f"   📊 检测语言: {info.language} ({info.language_probability:.0%})")
+            lyrics = [
+                (seg.start, seg.end, text)
+                for seg in segments
+                if (text := clean_lyric_text(seg.text)) and len(text) >= LRC_MIN_TEXT_LENGTH
+            ]
             self._log(f"   📝 有效歌词: {len(lyrics)} 行")
             return lyrics
 
@@ -124,6 +135,7 @@ class WhisperRecognizer:
                     os.remove(temp_wav)
                 except OSError:
                     pass
+
 
     def _convert_to_wav(self, audio_path: str) -> tuple[str, str | None]:
         """

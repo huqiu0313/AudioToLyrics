@@ -117,8 +117,7 @@ def separate_vocals(audio_path: str, output_dir: str | None = None,
             log_callback(msg)
         logger.info(msg)
 
-    _log("🎤 正在分离人声 (Demucs)...")
-    _log("   首次运行需下载模型约 800MB，请耐心等待")
+    _log("🎤 正在分离人声 (Demucs)...请耐心等待")
 
     # 优先 API
     vocal_path = _separate_via_api(audio_path, output_dir, device)
