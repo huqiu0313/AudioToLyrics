@@ -30,7 +30,7 @@
 
 ```bash
 # 进入项目目录
-cd audio_to_lrc-v2
+git clone
 
 # 安装依赖
 pip install -r requirements.txt
@@ -56,7 +56,7 @@ python main.py
 ## 🏗️ 项目结构
 
 ```
-audio_to_lrc-v2/
+AudioToLyrics/
 ├── main.py                 # 程序入口
 ├── config.py               # 全局配置
 ├── requirements.txt        # 依赖列表
@@ -88,7 +88,7 @@ audio_to_lrc-v2/
 | `WHISPER_MODELS` | 可选 Whisper 模型 | tiny ~ large |
 | `DEFAULT_WHISPER_MODEL` | 默认模型 | large |
 | `DEMUCS_MODELS` | 可选 Demucs 模型 | htdemucs / htdemucs_ft |
-| `LYRICS_PROVIDERS` | 歌词搜索平台优先级 | QQMusic > Kugou > lrclib > NetEase |
+| `LYRICS_PROVIDERS` | 歌曲信息搜索平台优先级 | QQMusic > Kugou > NetEase > lrclib |
 | `VIDEO_FORMATS` | 支持的视频格式 | mp4/mkv/avi/mov/webm/flv |
 | `SUPPORTED_MEDIA_FORMATS` | 所有支持的格式 | 音频 + 视频 |
 
