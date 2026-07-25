@@ -1,4 +1,4 @@
-"""AudioToLyrics v2 程序入口"""
+"""AudioToLyrics v4 程序入口"""
 
 import sys
 import os
