@@ -7,6 +7,7 @@
 
 ## ✨ 功能特性
 
+- 🔓 **加密音频解密** — 自动解密网易云(.ncm)、QQ音乐(.qmc/.mflac/.mgg)、酷狗(.kgm)、酷我(.kwm)、虾米(.xm)等加密格式，首次使用自动下载解密工具
 - 🎬 **视频自动转音频** — 检测到视频文件自动无损提取音轨为 FLAC
 - 🔍 **联网搜索歌词** — 优先从 QQ音乐、酷狗、LRCLib、网易云搜索官方歌词
 - 🎼 **专辑封面下载** — 自动搜索专辑信息并下载封面写入音频文件
@@ -17,6 +18,7 @@
 - 📐 **相似度校验** — 防止歌词误匹配（标题+歌手双重校验）
 - 🖥️ **GPU 加速** — Demucs 和 Whisper 均支持 CUDA 加速
 - 🗂️ **批量处理** — 支持拖拽添加多个音视频文件
+- 🗑️ **转换后清理** — 可选转换后自动删除源文件（加密/视频），默认保留
 - 💾 **智能识别** — 无音频tag时，支持识别 "歌名"、"歌名-歌手"、"歌手-歌名" 文件名格式
 
 ## 📋 系统要求
@@ -46,8 +48,8 @@ python main.py
 
 ## 📖 使用方法
 
-1. **添加文件** — 拖拽音视频文件到左侧面板，或点击「添加文件」按钮
-2. **调整设置** — 右侧可设置功能开关、Whisper/Demucs 模型、选择歌词搜索平台
+1. **添加文件** — 拖拽音视频文件到左侧面板，或点击「添加文件」按钮（支持加密音频、普通音视频文件）
+2. **调整设置** — 右侧可设置功能开关、解密输出目录、Whisper/Demucs 模型、选择歌词搜索平台
 3. **开始处理** — 点击「开始」按钮，等待处理完成
 4. **输出结果** — LRC 文件自动保存在音视频文件同目录下
 
@@ -60,8 +62,11 @@ AudioToLyrics/
 ├── main.py                 # 程序入口
 ├── config.py               # 全局配置
 ├── requirements.txt        # 依赖列表
+├── tools/                  # 外部工具目录
+│   └── um.exe              #   unlock-music CLI（首次使用时自动下载）
 ├── core/                   # 核心处理逻辑
 │   ├── pipeline.py         #   处理流水线编排
+│   ├── decryptor.py        #   加密音频解密（unlock-music）
 │   ├── internet_search.py  #   联网搜索（歌词/专辑/封面/歌曲名/歌手名）
 │   ├── video_converter.py  #   视频无损转音频（FFmpeg）
 │   ├── tag_writer.py       #   音频 tag 写入（mutagen）
@@ -89,8 +94,9 @@ AudioToLyrics/
 | `DEFAULT_WHISPER_MODEL` | 默认模型 | large |
 | `DEMUCS_MODELS` | 可选 Demucs 模型 | htdemucs / htdemucs_ft |
 | `LYRICS_PROVIDERS` | 歌曲信息搜索平台优先级 | QQMusic > Kugou > NetEase > lrclib |
+| `ENCRYPTED_FORMATS` | 支持的加密音频格式 | ncm/qmc/mflac/mgg/kgm/kwm/xm 等 |
 | `VIDEO_FORMATS` | 支持的视频格式 | mp4/mkv/avi/mov/webm/flv |
-| `SUPPORTED_MEDIA_FORMATS` | 所有支持的格式 | 音频 + 视频 |
+| `SUPPORTED_MEDIA_FORMATS` | 所有支持的格式 | 音频 + 视频 + 加密音频 |
 
 ## 📝 依赖说明
 
@@ -104,6 +110,20 @@ AudioToLyrics/
 | [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) | FFmpeg 二进制自动下载（视频转音频） |
 | [zhconv](https://github.com/gumblex/zhconv) | 繁简中文转换 |
 
+## 🔓 加密音频支持
+
+程序集成了 [unlock-music CLI](https://git.unlock-music.dev/um/cli) 用于解密各音乐平台的加密音频格式：
+
+| 平台 | 支持的加密格式 |
+|------|----------------|
+| 网易云音乐 | .ncm |
+| QQ音乐 | .qmc0/.qmc2/.qmc3/.qmcflac/.qmcogg/.tkm/.mflac/.mgg |
+| 酷狗音乐 | .kgm/.vpr |
+| 酷我音乐 | .kwm |
+| 虾米音乐 | .xm |
+
+首次处理加密文件时，程序会自动下载解密工具到 `tools/` 目录，无需手动安装。
+
 ## 📄 许可证
 
 MIT License
@@ -113,3 +133,4 @@ MIT License
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — 高效的 Whisper 实现
 - [Demucs](https://github.com/facebookresearch/demucs) — Meta 的音源分离工具
 - [syncedlyrics](https://github.com/rtcqz/syncedlyrics) — 多平台歌词搜索库
+- [unlock-music](https://git.unlock-music.dev/um/cli) — 音乐平台加密音频解密工具

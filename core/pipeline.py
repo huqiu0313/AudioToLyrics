@@ -1,5 +1,6 @@
-"""处理流程编排：视频转音频 → 歌词搜索 → tag写入 → 人声分离 → 语音识别 → LRC 输出"""
+"""处理流程编排：加密解密 → 视频转音频 → 歌词搜索 → tag写入 → 人声分离 → 语音识别 → LRC 输出"""
 
+import os
 import requests
 from pathlib import Path
 from typing import Callable
@@ -8,6 +9,7 @@ import zhconv
 
 from utils.audio_info import extract_info
 from core.internet_search import search_lyrics, search_song_info
+from core.decryptor import is_encrypted, decrypt_audio
 from core.video_converter import is_video, convert_to_audio
 from core.tag_writer import write_tags
 from core.separator import separate_vocals
@@ -28,6 +30,7 @@ def process_file(
     处理单个音频/视频文件的完整流程。
 
     流程：
+    -1. 若为加密音频 → 解密（首次使用自动下载解密工具）
     0. 若为视频且启用了自动转换 → 无损提取音轨
     1. 提取歌曲信息（标题/艺术家）
     2. 联网搜索官方歌词 + 专辑/封面
@@ -42,14 +45,40 @@ def process_file(
     auto_convert = cfg.get("auto_convert_video", True)
     use_demucs = cfg.get("use_demucs", False)
     use_whisper = cfg.get("use_whisper", False)
+    decrypt_output_dir = cfg.get("decrypt_output_dir", None) or None
+    delete_source = cfg.get("delete_source_after_convert", False)
+
+    # ── Step -1: 加密文件解密 ─────────────────────────────────────────────
+    if is_encrypted(audio_path):
+        progress_callback(2, f"检测到加密音频，正在解密...")
+        try:
+            original_path = audio_path
+            audio_path = decrypt_audio(
+                audio_path,
+                output_dir=decrypt_output_dir,
+                progress_callback=progress_callback,
+            )
+            progress_callback(7, f"解密完成: {Path(audio_path).name}")
+            # 若启用删除源文件，删除原加密文件
+            if delete_source and os.path.exists(original_path):
+                os.remove(original_path)
+                progress_callback(8, f"已删除源文件: {Path(original_path).name}")
+        except Exception as e:
+            progress_callback(100, f"加密音频解密失败: {e}")
+            return f"加密音频解密失败: {e}"
 
     # ── Step 0: 视频转音频 ────────────────────────────────────────────────
     if is_video(audio_path):
         if auto_convert:
             progress_callback(3, f"检测到视频文件，正在提取音轨...")
             try:
+                original_path = audio_path
                 audio_path = convert_to_audio(audio_path)
                 progress_callback(8, f"音轨提取完成: {Path(audio_path).name}")
+                # 若启用删除源文件，删除原视频文件
+                if delete_source and os.path.exists(original_path):
+                    os.remove(original_path)
+                    progress_callback(9, f"已删除源文件: {Path(original_path).name}")
             except Exception as e:
                 progress_callback(100, f"视频转音频失败: {e}")
                 return f"视频转音频失败: {e}"

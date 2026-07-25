@@ -31,3 +31,6 @@ Thumbs.db
 
 # pytest
 .pytest_cache/
+
+# unlock-music CLI 二进制文件（首次使用时自动下载）
+tools/um.exe

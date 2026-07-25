@@ -1,6 +1,7 @@
-"""设置面板：Whisper/Demucs 模型选择、歌词来源、功能开关"""
+"""设置面板：Whisper/Demucs 模型选择、歌词来源、功能开关、解密设置"""
 
 import customtkinter as ctk
+from tkinter import filedialog
 
 from gui import styles as S
 from config import (
@@ -34,6 +35,8 @@ class SettingsPanel(ctk.CTkFrame):
             "auto_convert_video": self._auto_convert_var.get(),
             "use_demucs": self._use_demucs_var.get(),
             "use_whisper": self._use_whisper_var.get(),
+            "decrypt_output_dir": self._decrypt_dir_var.get().strip(),
+            "delete_source_after_convert": self._delete_source_var.get(),
         }
 
     # ── 内部 UI 构建 ──────────────────────────────────────────────────────────
@@ -72,6 +75,39 @@ class SettingsPanel(ctk.CTkFrame):
             text_color=S.FG_PRIMARY,
             fg_color=S.FG_ACCENT,
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
+
+        # 转换后删除源文件
+        self._delete_source_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            scroll,
+            text="转换后删除源文件（加密/视频）",
+            variable=self._delete_source_var,
+            font=S.get_font_body(),
+            text_color=S.FG_PRIMARY,
+            fg_color=S.FG_ACCENT,
+        ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
+
+        # 解密输出目录
+        ctk.CTkLabel(
+            scroll, text="解密输出目录（留空则输出到源文件同目录）",
+            font=S.get_font_small(), text_color=S.FG_SECONDARY,
+        ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 2))
+        dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        dir_frame.pack(fill="x", padx=pad + 10)
+        self._decrypt_dir_var = ctk.StringVar(value="")
+        ctk.CTkEntry(
+            dir_frame,
+            textvariable=self._decrypt_dir_var,
+            placeholder_text="留空 = 源文件同目录",
+            font=S.get_font_body(),
+            fg_color=S.BG_INPUT,
+            height=S.INPUT_HEIGHT,
+        ).pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            dir_frame, text="浏览", width=50,
+            command=self._browse_decrypt_dir,
+            **S.SECONDARY_BTN(),
+        ).pack(side="left", padx=(6, 0))
 
         # 分割线
         ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=(S.PAD_BETWEEN, S.PAD_BETWEEN))
@@ -144,6 +180,13 @@ class SettingsPanel(ctk.CTkFrame):
 
         # 分割线
         ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
+
+    # ── 目录浏览 ────────────────────────────────────────────────────────────
+
+    def _browse_decrypt_dir(self) -> None:
+        folder = filedialog.askdirectory(title="选择解密输出目录")
+        if folder:
+            self._decrypt_dir_var.set(folder)
 
     # ── 下拉框启用/禁用联动 ────────────────────────────────────────────────
 
