@@ -19,10 +19,8 @@ from config import (
     UM_DOWNLOAD_TIMEOUT,
     UM_RUN_TIMEOUT,
 )
+from utils.paths import app_data_dir
 from utils.process import run_cancellable
-
-# 项目根目录
-ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 def is_encrypted(file_path: str) -> bool:
@@ -31,8 +29,8 @@ def is_encrypted(file_path: str) -> bool:
 
 
 def _get_um_cli_path() -> Path:
-    """返回 um.exe 的预期路径"""
-    return ROOT_DIR / "tools" / UM_CLI_NAME
+    """返回 um.exe 的预期路径（打包运行时位于 %APPDATA% 数据目录）"""
+    return app_data_dir() / "tools" / UM_CLI_NAME
 
 
 def ensure_um_cli(

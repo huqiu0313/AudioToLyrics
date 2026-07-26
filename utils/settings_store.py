@@ -2,13 +2,13 @@
 
 import json
 import os
-from pathlib import Path
 
 from utils.logging_setup import get_logger
+from utils.paths import app_data_dir
 
 logger = get_logger(__name__)
 
-_SETTINGS_PATH = Path(__file__).resolve().parent.parent / "user_settings.json"
+_SETTINGS_PATH = app_data_dir() / "user_settings.json"
 
 
 def load_settings() -> dict:

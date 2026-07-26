@@ -37,7 +37,13 @@ def _get_model(model_name: str):
         # 切换模型前释放旧模型，避免 GPU 显存泄漏
         _release_model_locked()
 
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as e:
+            raise RuntimeError(
+                "未安装 faster-whisper（安装版不含 AI 组件；"
+                "源码版请 pip install -r requirements-ai.txt）"
+            ) from e
 
         # 自动检测设备
         try:

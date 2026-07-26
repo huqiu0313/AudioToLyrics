@@ -38,3 +38,7 @@ tools/um.exe
 # 用户设置（运行时生成）
 user_settings.json
 logs/
+
+# PyInstaller 构建产物
+build/
+dist/

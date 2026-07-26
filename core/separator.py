@@ -1,5 +1,6 @@
 """Demucs 人声分离：从混合音频中提取人声轨道（通过子进程调用，避免 CUDA 上下文冲突）"""
 
+import importlib.util
 import sys
 import tempfile
 import threading
@@ -29,6 +30,12 @@ def separate_vocals(
     返回:
         分离后的人声 wav 文件路径
     """
+    if importlib.util.find_spec("demucs") is None:
+        raise RuntimeError(
+            "未安装 demucs（安装版不含 AI 组件；"
+            "源码版请 pip install -r requirements-ai.txt）"
+        )
+
     if device is None:
         try:
             import torch

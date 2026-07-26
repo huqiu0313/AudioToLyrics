@@ -34,18 +34,28 @@
 
 ## 🚀 安装与运行
 
+**方式一：Windows 安装包（推荐给普通用户）**
+
+到 [Releases](https://github.com/huqiu0313/AudioToLyrics/releases) 下载 `AudioToLyrics-Setup-*.exe`，双击安装即可，无需 Python 环境。
+（安装版为轻量版，不含 Demucs/Whisper AI 识别组件；未签名的应用首次运行出现 SmartScreen 提示属正常现象）
+
+**方式二：源码运行（含 AI 识别功能）**
+
 ```bash
 # 进入项目目录
 git clone
 
-# 安装依赖
+# 安装核心依赖
 pip install -r requirements.txt
+
+# 可选：安装 AI 识别组件（Demucs 人声分离 + Whisper 语音识别，体积较大）
+pip install -r requirements-ai.txt
 
 # 启动程序
 python main.py
 ```
 
-> **GPU 加速**：如需使用 CUDA，请安装 GPU 版 PyTorch：
+> **GPU 加速**：安装 AI 组件前，请先安装 GPU 版 PyTorch：
 > ```bash
 > pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 > ```
