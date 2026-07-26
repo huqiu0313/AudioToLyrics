@@ -153,8 +153,8 @@ def make_button(
     )
 
 
-def make_checkbox(parent, text: str, variable, command=None) -> ctk.CTkCheckBox:
-    """创建统一风格的复选框"""
+def make_checkbox(parent, text: str, variable, command=None, **kwargs) -> ctk.CTkCheckBox:
+    """创建统一风格的复选框（**kwargs 透传，如 state="disabled"）"""
     return ctk.CTkCheckBox(
         parent,
         text=text,
@@ -164,6 +164,7 @@ def make_checkbox(parent, text: str, variable, command=None) -> ctk.CTkCheckBox:
         text_color=FG_PRIMARY,
         fg_color=FG_ACCENT,
         hover_color=FG_ACCENT_HOVER,
+        **kwargs,
     )
 
 

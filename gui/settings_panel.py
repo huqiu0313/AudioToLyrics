@@ -9,6 +9,7 @@ from config import (
     DEMUCS_MODELS, DEFAULT_DEMUCS_MODEL,
     LYRICS_PROVIDERS, LYRICS_PROVIDER_LABELS,
 )
+from utils.deps import has_demucs, has_whisper
 from utils.logging_setup import get_logger
 
 logger = get_logger(__name__)
@@ -69,6 +70,12 @@ class SettingsPanel(ctk.CTkFrame):
         if isinstance(d.get("decrypt_output_dir"), str):
             self._decrypt_dir_var.set(d["decrypt_output_dir"])
 
+        # 安装版无 AI 组件：忽略持久化中的启用状态
+        if not self._demucs_available:
+            self._use_demucs_var.set(False)
+        if not self._whisper_available:
+            self._use_whisper_var.set(False)
+
         # 刷新下拉框启用/禁用联动
         self._on_demucs_toggle()
         self._on_whisper_toggle()
@@ -77,6 +84,10 @@ class SettingsPanel(ctk.CTkFrame):
 
     def _build_ui(self) -> None:
         pad = S.PAD_INNER
+
+        # AI 组件可用性（安装版未打包，对应选项禁用）
+        self._demucs_available = has_demucs()
+        self._whisper_available = has_whisper()
 
         # 使用可滚动容器，防止内容被裁剪
         scroll = ctk.CTkScrollableFrame(
@@ -139,14 +150,21 @@ class SettingsPanel(ctk.CTkFrame):
 
         # 启用 Demucs
         self._use_demucs_var = ctk.BooleanVar(value=False)
+        demucs_state = "normal" if self._demucs_available else "disabled"
         S.make_checkbox(
             scroll, "启用 Demucs 人声分离", self._use_demucs_var,
-            command=self._on_demucs_toggle,
+            command=self._on_demucs_toggle, state=demucs_state,
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
+        if self._demucs_available:
+            demucs_hint = "ℹ️ 需要下载模型，分离可大大提升识别准确率"
+            demucs_hint_color = S.FG_WARNING
+        else:
+            demucs_hint = "安装版未包含 Demucs 组件（源码版可 pip install -r requirements-ai.txt）"
+            demucs_hint_color = S.FG_DISABLED
         ctk.CTkLabel(
             scroll,
-            text="ℹ️ 需要下载模型，分离可大大提升识别准确率",
-            font=S.get_font_small(), text_color=S.FG_WARNING,
+            text=demucs_hint,
+            font=S.get_font_small(), text_color=demucs_hint_color,
         ).pack(anchor="w", padx=pad + 10)
 
         # Demucs 模型下拉
@@ -157,14 +175,21 @@ class SettingsPanel(ctk.CTkFrame):
 
         # 启用 Whisper
         self._use_whisper_var = ctk.BooleanVar(value=False)
+        whisper_state = "normal" if self._whisper_available else "disabled"
         S.make_checkbox(
             scroll, "启用 Whisper 语音识别", self._use_whisper_var,
-            command=self._on_whisper_toggle,
+            command=self._on_whisper_toggle, state=whisper_state,
         ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 0))
+        if self._whisper_available:
+            whisper_hint = "ℹ️ 需要下载模型，语音识别可能不准确"
+            whisper_hint_color = S.FG_WARNING
+        else:
+            whisper_hint = "安装版未包含 Whisper 组件（源码版可 pip install -r requirements-ai.txt）"
+            whisper_hint_color = S.FG_DISABLED
         ctk.CTkLabel(
             scroll,
-            text="ℹ️ 需要下载模型，语音识别可能不准确",
-            font=S.get_font_small(), text_color=S.FG_WARNING,
+            text=whisper_hint,
+            font=S.get_font_small(), text_color=whisper_hint_color,
         ).pack(anchor="w", padx=pad + 10)
 
         # Whisper 模型下拉
