@@ -16,8 +16,7 @@ OutputDir={#SourcePath}
 OutputBaseFilename=AudioToLyrics-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallMode=x64compatible
+ArchitecturesAllowed=x64
 PrivilegesRequired=admin
 WizardStyle=modern
 
