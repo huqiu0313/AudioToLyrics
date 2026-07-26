@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+from utils.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 def write_tags(
     audio_path: str,
@@ -27,8 +31,8 @@ def write_tags(
             _write_flac(audio_path, title, artist, album, cover_bytes, cover_mime, result)
         elif ext == ".m4a":
             _write_mp4(audio_path, title, artist, album, cover_bytes, cover_mime, result)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("写入 tag 失败 %s: %s", audio_path, e, exc_info=True)
 
     return result
 

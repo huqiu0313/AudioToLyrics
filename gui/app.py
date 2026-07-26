@@ -2,28 +2,58 @@
 
 import customtkinter as ctk
 
-from config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
+from config import (
+    WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT,
+    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
+)
 from gui import styles as S
 from gui.file_panel import FilePanel
 from gui.settings_panel import SettingsPanel
 from gui.progress_panel import ProgressPanel
+from utils.settings_store import load_settings, save_settings
 from utils.thread_worker import BatchWorker
 from core.pipeline import process_file
 
+# 批处理状态 → (文件列表显示文本, 列表状态级别, 日志级别)
+_STATUS_DISPLAY: dict[str, tuple[str | None, str | None, str]] = {
+    "processing": ("处理中...", "processing", "processing"),
+    "done": ("完成", "success", "success"),
+    "failed": ("失败", "error", "error"),
+    "cancelled": ("已取消", "processing", "processing"),
+    "all_done": (None, None, "success"),
+}
+
+# 批处理状态 → 日志图标
+_STATUS_ICON = {
+    "processing": "⏳",
+    "done": "✅",
+    "failed": "❌",
+    "cancelled": "⛔",
+    "all_done": "🎉",
+}
+
 
 class App(ctk.CTk):
-    """AudioToLyrics v3 主应用窗口"""
+    """AudioToLyrics 主应用窗口"""
 
     def __init__(self):
         super().__init__()
         self._worker: BatchWorker | None = None
+        self._success_paths: set[str] = set()
         self._setup_window()
         self._build_layout()
+        # 回填上次保存的设置（主题之外的设置面板各项）
+        self._settings_panel.apply_settings(self._saved_settings)
 
     # ── 窗口配置 ──────────────────────────────────────────────────────────────
 
     def _setup_window(self) -> None:
-        ctk.set_appearance_mode(S.APPEARANCE)
+        self._saved_settings = load_settings()
+        appearance = self._saved_settings.get("appearance", "System")
+        if appearance not in S.APPEARANCE_MODES.values():
+            appearance = "System"
+        self._appearance = appearance
+        ctk.set_appearance_mode(appearance)
         ctk.set_default_color_theme(S.COLOR_THEME)
         self.title(WINDOW_TITLE)
         self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -40,7 +70,7 @@ class App(ctk.CTk):
         title_frame.pack(fill="x", padx=pad, pady=(pad, 0))
         ctk.CTkLabel(
             title_frame,
-            text="🎵 AudioToLyrics v4",
+            text=f"🎵 {WINDOW_TITLE}",
             font=S.get_font_title(),
             text_color=S.FG_PRIMARY,
         ).pack(side="left")
@@ -50,6 +80,19 @@ class App(ctk.CTk):
             font=S.get_font_small(),
             text_color=S.FG_SECONDARY,
         ).pack(side="left", padx=(16, 0))
+
+        # 主题切换（跟随系统/浅色/深色）
+        self._appearance_button = ctk.CTkSegmentedButton(
+            title_frame,
+            values=list(S.APPEARANCE_MODES.keys()),
+            command=self._on_appearance_change,
+            font=S.get_font_body(),
+        )
+        self._appearance_button.pack(side="right")
+        saved_label = S.APPEARANCE_LABELS.get(
+            self._appearance, S.DEFAULT_APPEARANCE_LABEL
+        )
+        self._appearance_button.set(saved_label)
 
         # 主容器（grid 布局）
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -83,6 +126,20 @@ class App(ctk.CTk):
         )
         self._progress_panel.pack(fill="both", expand=True)
 
+    # ── 主题切换与设置持久化 ─────────────────────────────────────────────────
+
+    def _on_appearance_change(self, label: str) -> None:
+        self._appearance = S.APPEARANCE_MODES.get(label, "System")
+        ctk.set_appearance_mode(self._appearance)
+        self._persist_settings()
+
+    def _persist_settings(self) -> None:
+        """持久化主题 + 设置面板全部配置项"""
+        save_settings({
+            "appearance": self._appearance,
+            **self._settings_panel.get_config(),
+        })
+
     # ── 处理逻辑 ──────────────────────────────────────────────────────────────
 
     def _start_processing(self) -> None:
@@ -92,9 +149,10 @@ class App(ctk.CTk):
             return
 
         config = self._settings_panel.get_config()
+        self._persist_settings()
         self._progress_panel.set_running(True)
         self._progress_panel.append_log(f"[开始] 共 {len(files)} 个文件待处理")
-        self._success_paths: set[str] = set()  # 跟踪成功的文件路径
+        self._success_paths = set()
 
         def _on_progress(file_index, total, percent, message, status):
             # 在主线程中更新 UI（通过 after 调度）
@@ -115,35 +173,29 @@ class App(ctk.CTk):
             self._progress_panel.set_running(False)
 
     def _exit(self) -> None:
-        """退出应用：先停止正在运行的任务，再关闭窗口"""
+        """退出应用：保存设置，停止正在运行的任务，再关闭窗口"""
+        self._persist_settings()
         if self._worker:
             self._worker.stop()
         self.destroy()
 
     def _handle_progress(self, file_index: int, total: int, percent: int, message: str, status: str) -> None:
-        # 更新进度条和批量计数
+        # 当前文件进度 + 总进度（单调递增）
         self._progress_panel.update_progress(percent)
-        self._progress_panel.update_batch(file_index, total)
+        self._progress_panel.update_overall(file_index, total, percent)
 
-        # 更新日志
-        status_icon = {
-            "processing": "⏳",
-            "done": "✅",
-            "failed": "❌",
-            "cancelled": "⛔",
-            "all_done": "🎉",
-        }.get(status, "•")
-        self._progress_panel.append_log(f"[{file_index}/{total}] {status_icon} {message}")
+        # 日志（图标 + 按级别着色）
+        icon = _STATUS_ICON.get(status, "•")
+        _, _, log_level = _STATUS_DISPLAY.get(status, (None, None, "info"))
+        self._progress_panel.append_log(
+            f"[{file_index}/{total}] {icon} {message}", level=log_level
+        )
 
-        # 更新文件列表状态
-        display_status = {
-            "processing": "处理中...",
-            "done": "完成",
-            "failed": "失败",
-            "cancelled": "已取消",
-        }.get(status, "")
-        if display_status:
-            self._file_panel.set_file_status(file_index, display_status)
+        # 文件列表状态（path 键控，按级别着色）
+        display_text, level, _ = _STATUS_DISPLAY.get(status, (None, None, "info"))
+        if display_text and self._worker and 0 < file_index <= len(self._worker.file_list):
+            path = self._worker.file_list[file_index - 1]
+            self._file_panel.set_file_status(path, display_text, level)
 
         # 记录成功的文件路径
         if status == "done" and self._worker:

@@ -1,4 +1,4 @@
-# 🎵 AudioToLyrics v4
+# 🎵 AudioToLyrics v4.0
 
 从音视频文件中自动识别歌词，生成 LRC 歌词文件的桌面应用。同时支持联网搜索歌曲信息、写入音频文件tag。
 
@@ -9,7 +9,7 @@
 
 - 🔓 **加密音频解密** — 自动解密网易云(.ncm)、QQ音乐(.qmc/.mflac/.mgg)、酷狗(.kgm)、酷我(.kwm)、虾米(.xm)等加密格式，首次使用自动下载解密工具
 - 🎬 **视频自动转音频** — 检测到视频文件自动无损提取音轨为 FLAC
-- 🔍 **联网搜索歌词** — 优先从 QQ音乐、酷狗、LRCLib、网易云搜索官方歌词
+- 🔍 **联网搜索歌词** — 优先从 QQ音乐、酷狗、网易云、LRCLib 搜索官方歌词
 - 🎼 **专辑封面下载** — 自动搜索专辑信息并下载封面写入音频文件
 - 📝 **音频 tag 写入** — 自动写入标题/艺术家/专辑/封面（已有则保持不动）
 - 🎤 **Demucs 人声分离** — 用户可选启用，提取纯净人声
@@ -20,6 +20,10 @@
 - 🗂️ **批量处理** — 支持拖拽添加多个音视频文件
 - 🗑️ **转换后清理** — 可选转换后自动删除源文件（加密/视频），默认保留
 - 💾 **智能识别** — 无音频tag时，支持识别 "歌名"、"歌名-歌手"、"歌手-歌名" 文件名格式
+- 🌗 **明暗双主题** — 标题栏一键切换 跟随系统/浅色/深色，选择自动记忆
+- 💾 **设置记忆** — 模型选择、功能开关、输出目录等设置自动保存，下次启动恢复
+- 📊 **双进度条** — 总进度 + 当前文件进度，日志按级别着色
+- ⏹️ **可中断停止** — 停止按钮可即时终止解密/转码/人声分离子进程
 
 ## 📋 系统要求
 
@@ -53,6 +57,12 @@ python main.py
 3. **开始处理** — 点击「开始」按钮，等待处理完成
 4. **输出结果** — LRC 文件自动保存在音视频文件同目录下
 
+> **主题切换**：标题栏右上角可在「跟随系统 / 浅色 / 深色」之间切换，选择会自动记忆。
+>
+> **设置记忆**：所有设置项（含主题、模型选择、功能开关、输出目录）保存在项目根目录的 `user_settings.json`，下次启动自动恢复。
+>
+> **运行日志**：诊断日志写入 `logs/audiotolyrics.log`（1MB × 3 滚动，UTF-8），搜索失败、tag 写入异常等均可在此追溯。
+
 > **提示**：优先读取音频tag获取歌曲信息。若无tag，音视频文件建议命名为 `歌名.mp3`、`歌名-歌手.mp3` 或 `歌手-歌名.mp3`，以提高联网搜索匹配成功率。
 
 ## 🏗️ 项目结构
@@ -64,24 +74,29 @@ AudioToLyrics/
 ├── requirements.txt        # 依赖列表
 ├── tools/                  # 外部工具目录
 │   └── um.exe              #   unlock-music CLI（首次使用时自动下载）
+├── logs/                   # 运行日志（自动生成）
 ├── core/                   # 核心处理逻辑
 │   ├── pipeline.py         #   处理流水线编排
+│   ├── processing_config.py#   处理配置（强类型 dataclass）
 │   ├── decryptor.py        #   加密音频解密（unlock-music）
-│   ├── internet_search.py  #   联网搜索（歌词/专辑/封面/歌曲名/歌手名）
+│   ├── internet_search.py  #   联网搜索（歌词/专辑/封面，Provider 抽象）
 │   ├── video_converter.py  #   视频无损转音频（FFmpeg）
 │   ├── tag_writer.py       #   音频 tag 写入（mutagen）
 │   ├── separator.py        #   Demucs 人声分离
 │   ├── transcriber.py      #   faster-whisper 语音识别
 │   └── lrc_builder.py      #   LRC 文件构建与对齐
 ├── gui/                    # CustomTkinter 界面
-│   ├── app.py              #   主窗口
+│   ├── app.py              #   主窗口（主题切换、设置持久化）
 │   ├── file_panel.py       #   文件管理面板
 │   ├── settings_panel.py   #   设置面板
 │   ├── progress_panel.py   #   进度与日志面板
-│   └── styles.py           #   样式常量
+│   └── styles.py           #   双主题样式 token 与控件工厂
 └── utils/                  # 工具函数
     ├── audio_info.py       #   音频元数据读取 + 文件名解析
-    └── thread_worker.py    #   后台线程工作器
+    ├── thread_worker.py    #   后台线程工作器
+    ├── process.py          #   可取消的子进程执行
+    ├── logging_setup.py    #   日志系统初始化
+    └── settings_store.py   #   用户设置持久化
 ```
 
 ## ⚙️ 配置说明
@@ -102,10 +117,11 @@ AudioToLyrics/
 
 | 依赖 | 用途 |
 |------|------|
-| [customtkinter](https://github.com/TomSchimansky/CustomTkinter) | 现代化 GUI 界面 |
+| [customtkinter](https://github.com/TomSchimansky/CustomTkinter) | 现代化 GUI 界面（明暗双主题） |
 | [demucs](https://github.com/facebookresearch/demucs) | 人声分离（可选启用） |
 | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | 高效 Whisper 语音识别（可选启用） |
 | [syncedlyrics](https://github.com/rtcqz/syncedlyrics) | 联网歌词搜索 |
+| [requests](https://requests.readthedocs.io) | HTTP 请求（歌词/封面/工具下载） |
 | [mutagen](https://github.com/quodlibet/mutagen) | 音频元数据读取 + tag 写入 |
 | [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg) | FFmpeg 二进制自动下载（视频转音频） |
 | [zhconv](https://github.com/gumblex/zhconv) | 繁简中文转换 |
