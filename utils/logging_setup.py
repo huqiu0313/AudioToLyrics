@@ -3,7 +3,8 @@
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+
+from utils.paths import app_data_dir
 
 # 项目 logger 统一前缀，避免与 demucs/torch 等第三方 logger 混淆
 LOGGER_NAME = "audiotolyrics"
@@ -33,19 +34,21 @@ def setup_logging(level: int = logging.INFO) -> None:
         datefmt="%H:%M:%S",
     )
 
-    console = logging.StreamHandler(sys.stderr)
-    console.setLevel(level)
-    console.setFormatter(fmt)
-    # GBK 控制台遇到不可编码字符时替换而非崩溃
-    if hasattr(console.stream, "reconfigure"):
-        try:
-            console.stream.reconfigure(errors="replace")
-        except Exception:
-            pass
-    logger.addHandler(console)
+    # 控制台 handler：打包的窗口模式下 sys.stderr 为 None，跳过
+    if sys.stderr is not None:
+        console = logging.StreamHandler(sys.stderr)
+        console.setLevel(level)
+        console.setFormatter(fmt)
+        # GBK 控制台遇到不可编码字符时替换而非崩溃
+        if hasattr(console.stream, "reconfigure"):
+            try:
+                console.stream.reconfigure(errors="replace")
+            except Exception:
+                pass
+        logger.addHandler(console)
 
     try:
-        log_dir = Path(__file__).resolve().parent.parent / "logs"
+        log_dir = app_data_dir() / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
             log_dir / "audiotolyrics.log",
