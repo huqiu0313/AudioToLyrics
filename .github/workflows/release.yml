@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build app bundle
+        run: pyinstaller --noconfirm --clean packaging/audiotolyrics.spec
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ver = python -c "import config; print(config.VERSION)"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$ver" packaging/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver = python -c "import config; print(config.VERSION)"
+          $exe = "packaging/AudioToLyrics-Setup-$ver.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $exe -Leaf)" | Out-File -Encoding ascii "$exe.sha256"
+          gh release create $env:GITHUB_REF_NAME $exe "$exe.sha256" `
+            --title "AudioToLyrics $env:GITHUB_REF_NAME" --generate-notes

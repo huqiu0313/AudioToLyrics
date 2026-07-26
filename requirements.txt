@@ -4,5 +4,6 @@ customtkinter>=5.2.2,<7.0
 syncedlyrics>=0.8,<2.0
 mutagen>=1.46,<2.0
 requests>=2.31,<3.0
+chardet>=5.2,<6.0
 zhconv>=1.4.3,<2.0
 imageio-ffmpeg>=0.4.9,<1.0
