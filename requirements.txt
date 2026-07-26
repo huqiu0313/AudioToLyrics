@@ -1,9 +1,6 @@
-# 版本约束：>= 已知可用的稳定下限, < 下一个大版本（防止意外 major 升级）
-# 注：未能从统一运行环境 pip freeze（各 Python 环境均未装全依赖），下限为保守估计值，
-#     若你的环境版本更高，直接安装仍满足约束。
+# Core dependencies (optional AI features: see requirements-ai.txt).
+# Version constraints: >= known-good floor, < next major.
 customtkinter>=5.2.2,<7.0
-demucs>=4.0.1,<5.0
-faster-whisper>=1.0.3,<2.0
 syncedlyrics>=0.8,<2.0
 mutagen>=1.46,<2.0
 requests>=2.31,<3.0

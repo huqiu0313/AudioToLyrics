@@ -1,0 +1,4 @@
+# Optional AI features (source install only): Demucs vocal separation + Whisper ASR.
+# For GPU acceleration install CUDA PyTorch FIRST (see README).
+demucs>=4.0.1,<5.0
+faster-whisper>=1.0.3,<2.0
