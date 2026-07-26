@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+from utils.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 def extract_info(audio_path: str) -> tuple[str, str, list[tuple[str, str]]]:
     """
@@ -63,8 +67,9 @@ def _read_metadata(audio_path: str) -> tuple[str, str]:
                                 artist = str(audio.tags[akey])
                                 break
                         return title.strip(), artist.strip()
-    except Exception:
-        pass
+    except Exception as e:
+        # 元数据读不到有文件名解析兜底，属常态，仅记录 debug
+        logger.debug("读取元数据失败 %s: %s", audio_path, e)
     return "", ""
 
 

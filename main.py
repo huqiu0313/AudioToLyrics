@@ -8,10 +8,13 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-from gui.app import App
+from utils.logging_setup import setup_logging
 
 
 def main():
+    setup_logging()
+
+    from gui.app import App
     app = App()
     app.mainloop()
 

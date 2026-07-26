@@ -1,9 +1,10 @@
 """视频转音频：检测视频格式并无损提取音轨为 FLAC"""
 
-import subprocess
+import threading
 from pathlib import Path
 
-from config import VIDEO_FORMATS
+from config import SUBPROCESS_TIMEOUT, VIDEO_FORMATS
+from utils.process import run_cancellable
 
 
 def is_video(file_path: str) -> bool:
@@ -11,7 +12,11 @@ def is_video(file_path: str) -> bool:
     return Path(file_path).suffix.lower() in VIDEO_FORMATS
 
 
-def convert_to_audio(video_path: str, output_dir: str | None = None) -> str:
+def convert_to_audio(
+    video_path: str,
+    output_dir: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> str:
     """
     将视频文件无损提取音轨为 FLAC 格式。
 
@@ -21,11 +26,12 @@ def convert_to_audio(video_path: str, output_dir: str | None = None) -> str:
     参数:
         video_path: 视频文件路径
         output_dir: 输出目录，None 则与视频同目录
+        cancel_event: 可选的取消事件，set 后 ffmpeg 子进程会被终止
 
     返回:
         生成的音频文件路径
     """
-    import imageio_ffmpeg
+    import imageio_ffmpeg  # 延迟导入：首次使用时才触发 ffmpeg 二进制定位
 
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     video_path = Path(video_path)
@@ -49,7 +55,7 @@ def convert_to_audio(video_path: str, output_dir: str | None = None) -> str:
         str(out_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = run_cancellable(cmd, timeout=SUBPROCESS_TIMEOUT, cancel_event=cancel_event)
     if result.returncode != 0:
         raise RuntimeError(f"视频转音频失败: {result.stderr[:300]}")
 

@@ -1,16 +1,20 @@
 """Demucs 人声分离：从混合音频中提取人声轨道（通过子进程调用，避免 CUDA 上下文冲突）"""
 
 import sys
-import subprocess
 import tempfile
+import threading
 from pathlib import Path
+
+from config import DEFAULT_DEMUCS_MODEL, SUBPROCESS_TIMEOUT
+from utils.process import run_cancellable
 
 
 def separate_vocals(
     audio_path: str,
-    model_name: str = "htdemucs",
+    model_name: str = DEFAULT_DEMUCS_MODEL,
     device: str | None = None,
     output_dir: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """
     使用 Demucs 从音频中分离人声（通过子进程运行，确保 GPU 资源完全释放）。
@@ -20,6 +24,7 @@ def separate_vocals(
         model_name: Demucs 模型名（htdemucs / htdemucs_ft）
         device: 运算设备（"cuda" / "cpu"），None 则自动检测
         output_dir: 输出目录，None 则使用临时目录
+        cancel_event: 可选的取消事件，set 后分离子进程会被终止
 
     返回:
         分离后的人声 wav 文件路径
@@ -45,7 +50,7 @@ def separate_vocals(
         audio_path,
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = run_cancellable(cmd, timeout=SUBPROCESS_TIMEOUT, cancel_event=cancel_event)
     if result.returncode != 0:
         raise RuntimeError(f"Demucs 分离失败: {result.stderr[:300]}")
 

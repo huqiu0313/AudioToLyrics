@@ -9,6 +9,9 @@ from config import (
     DEMUCS_MODELS, DEFAULT_DEMUCS_MODEL,
     LYRICS_PROVIDERS, LYRICS_PROVIDER_LABELS,
 )
+from utils.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 
 class SettingsPanel(ctk.CTkFrame):
@@ -39,13 +42,46 @@ class SettingsPanel(ctk.CTkFrame):
             "delete_source_after_convert": self._delete_source_var.get(),
         }
 
+    def apply_settings(self, d: dict) -> None:
+        """从持久化 dict 回填设置（缺项/非法值保持默认）"""
+        if not d:
+            return
+
+        if d.get("whisper_model") in WHISPER_MODELS:
+            self._whisper_var.set(d["whisper_model"])
+        if d.get("demucs_model") in DEMUCS_MODELS:
+            self._demucs_var.set(d["demucs_model"])
+
+        providers = d.get("providers")
+        if isinstance(providers, list):
+            for key, var in self._provider_vars.items():
+                var.set(key in providers)
+
+        for key, var in (
+            ("auto_convert_video", self._auto_convert_var),
+            ("use_demucs", self._use_demucs_var),
+            ("use_whisper", self._use_whisper_var),
+            ("delete_source_after_convert", self._delete_source_var),
+        ):
+            if isinstance(d.get(key), bool):
+                var.set(d[key])
+
+        if isinstance(d.get("decrypt_output_dir"), str):
+            self._decrypt_dir_var.set(d["decrypt_output_dir"])
+
+        # 刷新下拉框启用/禁用联动
+        self._on_demucs_toggle()
+        self._on_whisper_toggle()
+
     # ── 内部 UI 构建 ──────────────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         pad = S.PAD_INNER
 
         # 使用可滚动容器，防止内容被裁剪
-        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent", scrollbar_button_color=S.BG_INPUT)
+        scroll = ctk.CTkScrollableFrame(
+            self, fg_color="transparent", scrollbar_button_color=S.BG_INPUT
+        )
         scroll.pack(fill="both", expand=True)
 
         # 标题
@@ -67,24 +103,14 @@ class SettingsPanel(ctk.CTkFrame):
 
         # 视频自动转音频
         self._auto_convert_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
-            scroll,
-            text="识别到视频则自动转为音频",
-            variable=self._auto_convert_var,
-            font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
+        S.make_checkbox(
+            scroll, "识别到视频则自动转为音频", self._auto_convert_var
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
 
         # 转换后删除源文件
         self._delete_source_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            scroll,
-            text="转换后删除源文件（加密/视频）",
-            variable=self._delete_source_var,
-            font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
+        S.make_checkbox(
+            scroll, "转换后删除源文件（加密/视频）", self._delete_source_var
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
 
         # 解密输出目录
@@ -103,24 +129,18 @@ class SettingsPanel(ctk.CTkFrame):
             fg_color=S.BG_INPUT,
             height=S.INPUT_HEIGHT,
         ).pack(side="left", fill="x", expand=True)
-        ctk.CTkButton(
-            dir_frame, text="浏览", width=50,
-            command=self._browse_decrypt_dir,
-            **S.SECONDARY_BTN(),
+        S.make_button(
+            dir_frame, "浏览", self._browse_decrypt_dir,
+            style="secondary", width=S.BTN_WIDTH_XS,
         ).pack(side="left", padx=(6, 0))
 
         # 分割线
-        ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=(S.PAD_BETWEEN, S.PAD_BETWEEN))
+        S.make_divider(scroll).pack(fill="x", padx=pad, pady=S.PAD_BETWEEN)
 
         # 启用 Demucs
         self._use_demucs_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            scroll,
-            text="启用 Demucs 人声分离",
-            variable=self._use_demucs_var,
-            font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
+        S.make_checkbox(
+            scroll, "启用 Demucs 人声分离", self._use_demucs_var,
             command=self._on_demucs_toggle,
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
         ctk.CTkLabel(
@@ -137,13 +157,8 @@ class SettingsPanel(ctk.CTkFrame):
 
         # 启用 Whisper
         self._use_whisper_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            scroll,
-            text="启用 Whisper 语音识别",
-            variable=self._use_whisper_var,
-            font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
+        S.make_checkbox(
+            scroll, "启用 Whisper 语音识别", self._use_whisper_var,
             command=self._on_whisper_toggle,
         ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 0))
         ctk.CTkLabel(
@@ -159,7 +174,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
 
         # 分割线
-        ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
+        S.make_divider(scroll).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
 
         # 歌词来源勾选框
         ctk.CTkLabel(
@@ -169,17 +184,12 @@ class SettingsPanel(ctk.CTkFrame):
         for key in LYRICS_PROVIDERS:
             var = ctk.BooleanVar(value=True)
             self._provider_vars[key] = var
-            ctk.CTkCheckBox(
-                scroll,
-                text=LYRICS_PROVIDER_LABELS[key],
-                variable=var,
-                font=S.get_font_body(),
-                text_color=S.FG_PRIMARY,
-                fg_color=S.FG_ACCENT,
-            ).pack(anchor="w", padx=pad + 10, pady=(2, 0))
+            S.make_checkbox(scroll, LYRICS_PROVIDER_LABELS[key], var).pack(
+                anchor="w", padx=pad + 10, pady=(2, 0)
+            )
 
-        # 分割线
-        ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
+        # 底部分割线
+        S.make_divider(scroll).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
 
     # ── 目录浏览 ────────────────────────────────────────────────────────────
 
@@ -229,4 +239,5 @@ class SettingsPanel(ctk.CTkFrame):
                 return f"cuda（{gpu_name}）"
             return "cpu"
         except ImportError:
+            logger.debug("未安装 torch，计算设备按 cpu 处理")
             return "cpu（未安装 torch）"

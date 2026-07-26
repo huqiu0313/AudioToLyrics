@@ -3,6 +3,10 @@
 import threading
 from typing import Callable
 
+from utils.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 class BatchWorker:
     """
@@ -15,6 +19,11 @@ class BatchWorker:
         - percent: 当前文件进度（0-100）
         - message: 状态文本
         - status: "processing" | "done" | "failed" | "cancelled" | "all_done"
+
+    process_func signature:
+        process_func(file_path, progress_cb, config, cancel_event) -> str
+        - progress_cb(percent, message): 单文件进度回调
+        - cancel_event: 停止事件，set 后应尽早终止当前处理
     """
 
     def __init__(
@@ -31,7 +40,6 @@ class BatchWorker:
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._current_file: str = ""
 
     @property
     def is_running(self) -> bool:
@@ -59,16 +67,21 @@ class BatchWorker:
                 self._emit(i + 1, total, 0, "已取消", "cancelled")
                 break
 
-            self._current_file = audio_path
             self._emit(i + 1, total, 0, f"正在处理: {audio_path}", "processing")
 
             def _progress(percent: int, message: str) -> None:
                 self._emit(i + 1, total, percent, message, "processing")
 
             try:
-                result = self.process_func(audio_path, _progress, self.config)
-                self._emit(i + 1, total, 100, result or "完成", "done")
-                success_count += 1
+                result = self.process_func(
+                    audio_path, _progress, self.config, self._stop_event
+                )
+                if self._stop_event.is_set():
+                    # 文件因取消而提前结束，不计入成功
+                    self._emit(i + 1, total, 100, result or "已取消", "cancelled")
+                else:
+                    self._emit(i + 1, total, 100, result or "完成", "done")
+                    success_count += 1
             except Exception as e:
                 self._emit(i + 1, total, 100, f"失败: {e}", "failed")
                 fail_count += 1
@@ -81,5 +94,6 @@ class BatchWorker:
         if self.progress_callback:
             try:
                 self.progress_callback(file_index, total, percent, message, status)
-            except Exception:
-                pass
+            except Exception as e:
+                # 回调失败是 GUI 侧真问题，需要可追溯
+                logger.warning("进度回调执行失败: %s", e, exc_info=True)

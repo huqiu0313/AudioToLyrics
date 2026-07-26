@@ -4,7 +4,7 @@
 """
 
 import io
-import subprocess
+import threading
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -16,7 +16,10 @@ from config import (
     UM_CLI_NAME,
     UM_CLI_DOWNLOAD_URL,
     UM_CLI_ZIP_ENTRY,
+    UM_DOWNLOAD_TIMEOUT,
+    UM_RUN_TIMEOUT,
 )
+from utils.process import run_cancellable
 
 # 项目根目录
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -53,7 +56,7 @@ def ensure_um_cli(
         progress_callback(1, "正在下载 unlock-music 解密工具...")
 
     try:
-        resp = requests.get(UM_CLI_DOWNLOAD_URL, timeout=120, stream=False)
+        resp = requests.get(UM_CLI_DOWNLOAD_URL, timeout=UM_DOWNLOAD_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as e:
         raise RuntimeError(
@@ -89,6 +92,7 @@ def decrypt_audio(
     file_path: str,
     output_dir: str | None = None,
     progress_callback: Callable[[int, str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """
     使用 unlock-music CLI 解密加密音频文件。
@@ -97,6 +101,7 @@ def decrypt_audio(
         file_path: 加密音频文件路径
         output_dir: 解密后文件的输出目录，None 则输出到源文件同目录
         progress_callback: 可选的进度回调
+        cancel_event: 可选的取消事件，set 后解密子进程会被终止
 
     返回:
         解密后的音频文件路径
@@ -120,7 +125,7 @@ def decrypt_audio(
         str(file_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = run_cancellable(cmd, timeout=UM_RUN_TIMEOUT, cancel_event=cancel_event)
 
     if result.returncode != 0:
         raise RuntimeError(

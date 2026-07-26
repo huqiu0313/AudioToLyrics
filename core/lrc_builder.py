@@ -53,21 +53,11 @@ def save_lrc(content: str, output_path: str) -> None:
         f.write(content)
 
 
-def get_lrc_path(audio_path: str, output_dir: str | None = None) -> str:
+def get_lrc_path(audio_path: str) -> str:
     """
-    根据音频路径生成对应的 LRC 输出路径。
-
-    参数:
-        audio_path: 音频文件路径
-        output_dir: 输出目录，None 则与音频同目录
-
-    返回:
-        LRC 文件路径字符串
+    根据音频路径生成对应的 LRC 输出路径（与音频同目录、同名 .lrc）。
     """
-    audio_path = Path(audio_path)
-    if output_dir:
-        return str(Path(output_dir) / (audio_path.stem + ".lrc"))
-    return str(audio_path.with_suffix(".lrc"))
+    return str(Path(audio_path).with_suffix(".lrc"))
 
 
 def _format_timestamp(seconds: float) -> str:
