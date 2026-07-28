@@ -1,16 +1,29 @@
 """联网搜索：歌词、专辑、封面、歌曲名、歌手名：支持 lrclib、网易云、QQ音乐、酷狗"""
 
 import re
+import base64
 import requests
 from typing import Optional
 from difflib import SequenceMatcher
 
 import syncedlyrics
+import zhconv
 
 
 # 标题/歌手匹配的最低相似度阈值
-_MIN_TITLE_SIMILARITY = 0.5
-_MIN_ARTIST_SIMILARITY = 0.4
+_MIN_TITLE_SIMILARITY = 0.8
+_MIN_ARTIST_SIMILARITY = 0.7
+
+# 时长校验容差（秒）
+_DURATION_TOLERANCE = 5
+
+# 歌手分隔符正则
+_ARTIST_SPLIT_RE = re.compile(
+    r"\s*(?:/|&|、|,|，|feat\.|ft\.|with)\s*", re.IGNORECASE
+)
+
+# LRC 时间戳正则（预编译）
+_TIMESTAMP_RE = re.compile(r"\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]")
 
 _UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -25,9 +38,13 @@ def search_lyrics(
     title: str,
     artist: str = "",
     providers: list[str] | None = None,
+    duration: float = 0,
 ) -> Optional[tuple[str, str, dict]]:
     """
     从多个平台搜索同步歌词（带时间戳的 LRC 格式）及歌曲信息。
+
+    参数:
+        duration: 音频时长（秒），用于校验搜索结果，0 表示不校验
 
     返回: (lrc_text, provider_name, song_info) 或 None
     song_info: {"album": str, "cover_url": str}（可能为空值）
@@ -44,7 +61,7 @@ def search_lyrics(
     # 第一轮：优先查找同步歌词
     for provider in providers:
         try:
-            result = _search_provider_full(provider, title, artist, synced_only=True)
+            result = _search_provider_full(provider, title, artist, synced_only=True, duration=duration)
             if result:
                 lrc_text, song_info = result
                 if lrc_text and _has_timestamps(lrc_text):
@@ -55,7 +72,7 @@ def search_lyrics(
     # 第二轮：放宽限制，接受任何带时间戳的结果
     for provider in providers:
         try:
-            result = _search_provider_full(provider, title, artist, synced_only=False)
+            result = _search_provider_full(provider, title, artist, synced_only=False, duration=duration)
             if result:
                 lrc_text, song_info = result
                 if lrc_text and _has_timestamps(lrc_text):
@@ -70,6 +87,7 @@ def search_song_info(
     title: str,
     artist: str = "",
     providers: list[str] | None = None,
+    duration: float = 0,
 ) -> Optional[dict]:
     """
     仅搜索歌曲名称、歌手以及专辑信息和封面 URL（不需要歌词）。
@@ -87,7 +105,7 @@ def search_song_info(
 
     for provider in providers:
         try:
-            info = _search_song_info_provider(provider, title, artist)
+            info = _search_song_info_provider(provider, title, artist, duration)
             if info and (info.get("album") or info.get("cover_url")
                          or info.get("matched_title") or info.get("matched_artist")):
                 return info
@@ -101,7 +119,7 @@ def search_song_info(
 
 
 def _search_provider_full(
-    provider: str, title: str, artist: str, synced_only: bool
+    provider: str, title: str, artist: str, synced_only: bool, duration: float = 0
 ) -> Optional[tuple[str, dict]]:
     """搜索歌词 + 歌曲信息，返回 (lrc_text, song_info) 或 None"""
     search_term = f"{artist} {title}".strip() if artist else title
@@ -112,232 +130,190 @@ def _search_provider_full(
         )
         if lrc:
             # lrclib/NetEase 不提供封面，但可以尝试独立搜索歌曲信息
-            info = _search_song_info_provider(provider, title, artist) or {}
+            info = _search_song_info_provider(provider, title, artist, duration) or {}
             return lrc, info
         return None
 
     elif provider == "QQMusic":
-        return _search_qq_music(title, artist)
+        return _search_qq_music(title, artist, duration)
     elif provider == "Kugou":
-        return _search_kugou(title, artist)
+        return _search_kugou(title, artist, duration)
     return None
 
 
 def _search_song_info_provider(
-    provider: str, title: str, artist: str
+    provider: str, title: str, artist: str, duration: float = 0
 ) -> Optional[dict]:
     """从指定平台搜索歌曲专辑/封面信息"""
     if provider == "QQMusic":
-        return _qq_music_info(title, artist)
+        return _qq_music_info(title, artist, duration)
     elif provider == "Kugou":
-        return _kugou_info(title, artist)
+        return _kugou_info(title, artist, duration)
     elif provider == "NetEase":
-        return _netease_info(title, artist)
+        return _netease_info(title, artist, duration)
     return None
 
 
 # ── QQ 音乐 ─────────────────────────────────────────────────────────────────
 
 
-def _search_qq_music(title: str, artist: str) -> Optional[tuple[str, dict]]:
+def _qq_music_find_song(title: str, artist: str, duration: float, limit: int = 5) -> Optional[dict]:
+    """QQ音乐搜索并返回第一个匹配的歌曲原始数据，未匹配返回 None"""
+    url = (
+        "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
+        f"?w={requests.utils.quote(title + ' ' + artist)}"
+        f"&format=json&n={limit}"
+    )
+    headers = {"Referer": "https://y.qq.com", "User-Agent": _UA}
+    resp = requests.get(url, headers=headers, timeout=8)
+    songs = resp.json().get("data", {}).get("song", {}).get("list", [])
+
+    for song in songs:
+        song_name = song.get("songname", "")
+        singers = " ".join(s.get("name", "") for s in song.get("singer", []))
+        if not _is_match(title, song_name, artist, singers):
+            continue
+        if not _duration_ok(duration, song.get("interval", 0)):
+            continue
+        return song
+    return None
+
+
+def _qq_music_song_info(song: dict) -> dict:
+    """从 QQ音乐 song 对象提取专辑/封面/歌曲名/歌手名"""
+    song_name = song.get("songname", "")
+    singers = " ".join(s.get("name", "") for s in song.get("singer", []))
+    album_mid = song.get("albummid", "")
+    cover_url = f"https://y.qq.com/music/photo_new/T002R300x300M000{album_mid}.jpg" if album_mid else ""
+    return {
+        "album": song.get("albumname", ""),
+        "cover_url": cover_url,
+        "matched_title": song_name,
+        "matched_artist": singers,
+    }
+
+
+def _search_qq_music(title: str, artist: str, duration: float = 0) -> Optional[tuple[str, dict]]:
     """从 QQ 音乐搜索歌词 + 专辑/封面"""
     try:
-        url = (
-            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
-            f"?w={requests.utils.quote(title + ' ' + artist)}"
-            "&format=json&n=5"
-        )
-        headers = {"Referer": "https://y.qq.com", "User-Agent": _UA}
-        resp = requests.get(url, headers=headers, timeout=8)
-        songs = resp.json().get("data", {}).get("song", {}).get("list", [])
-
-        for song in songs:
-            song_name = song.get("songname", "")
-            singers = " ".join(s.get("name", "") for s in song.get("singer", []))
-            if not _is_match(title, song_name, artist, singers):
-                continue
-
-            song_mid = song.get("songmid", "")
-            if not song_mid:
-                continue
-
-            # 获取歌词
-            lrc_url = (
-                "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
-                f"?songmid={song_mid}&format=json&nobase64=1"
-            )
-            lrc_resp = requests.get(lrc_url, headers=headers, timeout=8)
-            lyric = lrc_resp.json().get("lyric", "")
-
-            # 提取专辑/封面/歌曲名/歌手名
-            album_name = song.get("albumname", "")
-            album_mid = song.get("albummid", "")
-            cover_url = ""
-            if album_mid:
-                cover_url = (
-                    f"https://y.qq.com/music/photo_new/T002R300x300M000{album_mid}.jpg"
-                )
-
-            song_info = {
-                "album": album_name,
-                "cover_url": cover_url,
-                "matched_title": song_name,
-                "matched_artist": singers,
-            }
-
-            if lyric and _has_timestamps(lyric):
-                return lyric, song_info
+        song = _qq_music_find_song(title, artist, duration)
+        if not song:
+            return None
+        song_mid = song.get("songmid", "")
+        if not song_mid:
             return None
 
+        headers = {"Referer": "https://y.qq.com", "User-Agent": _UA}
+        lrc_url = (
+            "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
+            f"?songmid={song_mid}&format=json&nobase64=1"
+        )
+        lyric = requests.get(lrc_url, headers=headers, timeout=8).json().get("lyric", "")
+        song_info = _qq_music_song_info(song)
+
+        if lyric and _has_timestamps(lyric):
+            return lyric, song_info
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
 
-def _qq_music_info(title: str, artist: str) -> Optional[dict]:
+def _qq_music_info(title: str, artist: str, duration: float = 0) -> Optional[dict]:
     """仅从 QQ 音乐获取专辑/封面信息"""
     try:
-        url = (
-            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
-            f"?w={requests.utils.quote(title + ' ' + artist)}"
-            "&format=json&n=3"
-        )
-        headers = {"Referer": "https://y.qq.com", "User-Agent": _UA}
-        resp = requests.get(url, headers=headers, timeout=8)
-        songs = resp.json().get("data", {}).get("song", {}).get("list", [])
-
-        for song in songs:
-            song_name = song.get("songname", "")
-            singers = " ".join(s.get("name", "") for s in song.get("singer", []))
-            if not _is_match(title, song_name, artist, singers):
-                continue
-            album_name = song.get("albumname", "")
-            album_mid = song.get("albummid", "")
-            cover_url = ""
-            if album_mid:
-                cover_url = (
-                    f"https://y.qq.com/music/photo_new/T002R300x300M000{album_mid}.jpg"
-                )
-            return {
-                "album": album_name,
-                "cover_url": cover_url,
-                "matched_title": song_name,
-                "matched_artist": singers,
-            }
+        song = _qq_music_find_song(title, artist, duration, limit=3)
+        return _qq_music_song_info(song) if song else None
     except Exception:
-        pass
-    return None
+        return None
 
 
 # ── 酷狗音乐 ────────────────────────────────────────────────────────────────
 
 
-def _search_kugou(title: str, artist: str) -> Optional[tuple[str, dict]]:
+def _kugou_find_song(title: str, artist: str, duration: float, limit: int = 5) -> Optional[dict]:
+    """酷狗搜索并返回第一个匹配的歌曲原始数据，未匹配返回 None"""
+    search_kw = f"{artist} {title}".strip()
+    url = (
+        "https://songsearch.kugou.com/song_search_v2"
+        f"?keyword={requests.utils.quote(search_kw)}&page_size={limit}"
+    )
+    resp = requests.get(url, headers={"User-Agent": _UA}, timeout=8)
+    songs = resp.json().get("data", {}).get("lists", [])
+
+    for song in songs:
+        song_name = song.get("SongName", "").replace("<em>", "").replace("</em>", "")
+        singer = song.get("SingerName", "").replace("<em>", "").replace("</em>", "")
+        if not _is_match(title, song_name, artist, singer):
+            continue
+        if not _duration_ok(duration, song.get("Duration", 0)):
+            continue
+        return song
+    return None
+
+
+def _kugou_song_info(song: dict) -> dict:
+    """从酷狗 song 对象提取专辑/封面/歌曲名/歌手名"""
+    song_name = song.get("SongName", "").replace("<em>", "").replace("</em>", "")
+    singer = song.get("SingerName", "").replace("<em>", "").replace("</em>", "")
+    album_id = song.get("AlbumID", "")
+    cover_url = f"https://imge.kugou.com/stdmusic/150/{album_id}.jpg" if album_id else ""
+    return {
+        "album": song.get("AlbumName", ""),
+        "cover_url": cover_url,
+        "matched_title": song_name,
+        "matched_artist": singer,
+    }
+
+
+def _search_kugou(title: str, artist: str, duration: float = 0) -> Optional[tuple[str, dict]]:
     """从酷狗音乐搜索歌词 + 专辑/封面"""
     try:
-        search_kw = f"{artist} {title}".strip()
-        url = (
-            "https://songsearch.kugou.com/song_search_v2"
-            f"?keyword={requests.utils.quote(search_kw)}&page_size=5"
-        )
-        resp = requests.get(url, headers={"User-Agent": _UA}, timeout=8)
-        songs = resp.json().get("data", {}).get("lists", [])
-
-        for song in songs:
-            song_name = song.get("SongName", "").replace("<em>", "").replace("</em>", "")
-            singer = song.get("SingerName", "").replace("<em>", "").replace("</em>", "")
-            if not _is_match(title, song_name, artist, singer):
-                continue
-
-            song_hash = song.get("FileHash", "")
-            if not song_hash:
-                continue
-
-            # 获取歌词
-            lrc_url = (
-                f"https://krcs.kugou.com/search"
-                f"?ver=1&man=yes&client=mobi&hash={song_hash}"
-            )
-            lrc_resp = requests.get(lrc_url, headers={"User-Agent": _UA}, timeout=8)
-            lrc_data = lrc_resp.json()
-
-            lyric_id = lrc_data.get("candidates", [{}])[0].get("id", "")
-            lyric_key = lrc_data.get("candidates", [{}])[0].get("accesskey", "")
-            if not lyric_id or not lyric_key:
-                continue
-
-            content_url = (
-                f"https://krcs.kugou.com/download"
-                f"?ver=1&client=mobi&id={lyric_id}&accesskey={lyric_key}"
-            )
-            content_resp = requests.get(content_url, headers={"User-Agent": _UA}, timeout=8)
-            content_data = content_resp.json()
-            import base64
-            content_b64 = content_data.get("content", "")
-            lyric = ""
-            if content_b64:
-                lyric = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
-
-            # 提取专辑/封面/歌曲名/歌手名
-            album_name = song.get("AlbumName", "")
-            album_id = song.get("AlbumID", "")
-            cover_url = ""
-            if album_id:
-                cover_url = (
-                    f"https://imge.kugou.com/stdmusic/150/{album_id}.jpg"
-                )
-
-            song_info = {
-                "album": album_name,
-                "cover_url": cover_url,
-                "matched_title": song_name,
-                "matched_artist": singer,
-            }
-
-            if lyric and _has_timestamps(lyric):
-                return lyric, song_info
+        song = _kugou_find_song(title, artist, duration)
+        if not song:
+            return None
+        song_hash = song.get("FileHash", "")
+        if not song_hash:
             return None
 
+        # 获取歌词
+        lrc_resp = requests.get(
+            f"https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash={song_hash}",
+            headers={"User-Agent": _UA}, timeout=8,
+        ).json()
+        candidates = lrc_resp.get("candidates", [{}])
+        lyric_id = candidates[0].get("id", "")
+        lyric_key = candidates[0].get("accesskey", "")
+        if not lyric_id or not lyric_key:
+            return None
+
+        content_data = requests.get(
+            f"https://krcs.kugou.com/download?ver=1&client=mobi&id={lyric_id}&accesskey={lyric_key}",
+            headers={"User-Agent": _UA}, timeout=8,
+        ).json()
+        content_b64 = content_data.get("content", "")
+        lyric = base64.b64decode(content_b64).decode("utf-8", errors="ignore") if content_b64 else ""
+
+        song_info = _kugou_song_info(song)
+        if lyric and _has_timestamps(lyric):
+            return lyric, song_info
+        return None
     except Exception:
-        pass
-    return None
+        return None
 
 
-def _kugou_info(title: str, artist: str) -> Optional[dict]:
+def _kugou_info(title: str, artist: str, duration: float = 0) -> Optional[dict]:
     """仅从酷狗获取专辑/封面信息"""
     try:
-        search_kw = f"{artist} {title}".strip()
-        url = (
-            "https://songsearch.kugou.com/song_search_v2"
-            f"?keyword={requests.utils.quote(search_kw)}&page_size=3"
-        )
-        resp = requests.get(url, headers={"User-Agent": _UA}, timeout=8)
-        songs = resp.json().get("data", {}).get("lists", [])
-        for song in songs:
-            song_name = song.get("SongName", "").replace("<em>", "").replace("</em>", "")
-            singer = song.get("SingerName", "").replace("<em>", "").replace("</em>", "")
-            if not _is_match(title, song_name, artist, singer):
-                continue
-            album_name = song.get("AlbumName", "")
-            album_id = song.get("AlbumID", "")
-            cover_url = ""
-            if album_id:
-                cover_url = f"https://imge.kugou.com/stdmusic/150/{album_id}.jpg"
-            return {
-                "album": album_name,
-                "cover_url": cover_url,
-                "matched_title": song_name,
-                "matched_artist": singer,
-            }
+        song = _kugou_find_song(title, artist, duration, limit=3)
+        return _kugou_song_info(song) if song else None
     except Exception:
-        pass
-    return None
+        return None
 
 
 # ── 网易云音乐 ──────────────────────────────────────────────────────────────
 
 
-def _netease_info(title: str, artist: str) -> Optional[dict]:
+def _netease_info(title: str, artist: str, duration: float = 0) -> Optional[dict]:
     """从网易云获取专辑/封面信息"""
     try:
         search_kw = f"{artist} {title}".strip()
@@ -353,6 +329,10 @@ def _netease_info(title: str, artist: str) -> Optional[dict]:
             singers = " ".join(s.get("name", "") for s in song.get("artists", []))
             if not _is_match(title, song_name, artist, singers):
                 continue
+            # 时长校验（网易云 duration 单位为毫秒）
+            song_duration_ms = song.get("duration", 0)
+            if not _duration_ok(duration, song_duration_ms / 1000.0):
+                continue
             album = song.get("album", {})
             album_name = album.get("name", "")
             cover_url = album.get("picUrl", "")
@@ -367,20 +347,91 @@ def _netease_info(title: str, artist: str) -> Optional[dict]:
     return None
 
 
+# ── 歌手头像搜索 ──────────────────────────────────────────────────────────────
+
+
+def search_artist_image_url(artist_name: str) -> Optional[str]:
+    """联网搜索歌手头像 URL（优先 QQ音乐，备选网易云）"""
+    if not artist_name:
+        return None
+    return _qq_music_artist_image(artist_name) or _netease_artist_image(artist_name)
+
+
+def _qq_music_artist_image(artist_name: str) -> Optional[str]:
+    """从 QQ音乐搜索歌手头像"""
+    try:
+        url = (
+            "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
+            f"?w={requests.utils.quote(artist_name)}"
+            "&format=json&n=1&remoteplace=txt.yqq.singer"
+        )
+        headers = {"Referer": "https://y.qq.com", "User-Agent": _UA}
+        resp = requests.get(url, headers=headers, timeout=8)
+        data = resp.json().get("data", {})
+
+        # 优先从 singer 列表获取
+        singers = data.get("singer", {}).get("list", [])
+        if singers:
+            singer_mid = singers[0].get("singer_mid", "")
+            if singer_mid:
+                return f"https://y.qq.com/music/photo_new/T001R300x300M000{singer_mid}.jpg"
+
+        # 备选：从歌曲结果中提取歌手 mid
+        songs = data.get("song", {}).get("list", [])
+        for song in songs:
+            for singer in song.get("singer", []):
+                singer_mid = singer.get("mid", "")
+                if singer_mid:
+                    return f"https://y.qq.com/music/photo_new/T001R300x300M000{singer_mid}.jpg"
+    except Exception:
+        pass
+    return None
+
+
+def _netease_artist_image(artist_name: str) -> Optional[str]:
+    """从网易云搜索歌手头像"""
+    try:
+        url = (
+            "https://music.163.com/api/search/get/web"
+            f"?s={requests.utils.quote(artist_name)}&type=100&limit=1"
+        )
+        headers = {"Referer": "https://music.163.com", "User-Agent": _UA}
+        resp = requests.post(url, headers=headers, timeout=8)
+        artists = resp.json().get("result", {}).get("artists", [])
+        if artists:
+            artist = artists[0]
+            # 优先使用 img1v1Url（歌手头像），备选 picUrl
+            img_url = artist.get("img1v1Url", "") or artist.get("picUrl", "")
+            if img_url and "default" not in img_url:
+                return img_url
+    except Exception:
+        pass
+    return None
+
+
 # ── 工具函数 ────────────────────────────────────────────────────────────────
 
 
 def _has_timestamps(lrc_text: str) -> bool:
     """检查歌词是否包含 LRC 时间戳格式 [mm:ss.xx]"""
-    pattern = re.compile(r"\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]")
-    return bool(pattern.search(lrc_text))
+    return bool(_TIMESTAMP_RE.search(lrc_text))
 
 
 def _normalize(text: str) -> str:
-    """标准化文本：去除括号、特殊符号、多余空格，统一小写"""
+    """
+    标准化文本用于比较：
+    - 繁转简
+    - 统一小写
+    - 去除首尾空白和多余空格
+    - 保留括号内容（如 Live、Remix 等修饰信息参与匹配）
+    - 仅去除不影响语义的特殊符号（保留括号、字母、数字、中文）
+    """
+    text = zhconv.convert(text, "zh-cn")
     text = text.lower().strip()
-    text = re.sub(r"[\(（\[【].*?[\)）\]】]", "", text)
-    text = re.sub(r"[^\w\u4e00-\u9fff\s]", "", text)
+    # 去除不影响语义的特殊符号，但保留括号内容
+    text = re.sub(r"[^\w\u4e00-\u9fff\s()（）\[\]【】]", "", text)
+    # 压缩多余空格
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
@@ -391,18 +442,71 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
+def _split_artists(artist_str: str) -> list[str]:
+    """将歌手字符串按分隔符拆分为列表，每个元素经过 normalize"""
+    if not artist_str:
+        return []
+    parts = _ARTIST_SPLIT_RE.split(artist_str)
+    return [_normalize(p) for p in parts if p.strip()]
+
+
+def _artists_match(expected_artist: str, actual_artist: str) -> bool:
+    """
+    校验歌手是否匹配：
+    - 拆分为多个歌手后，允许顺序不同
+    - 但不允许多、少或有一个不同
+    - 单个歌手之间用相似度 >= _MIN_ARTIST_SIMILARITY 判定
+    """
+    expected_list = _split_artists(expected_artist)
+    actual_list = _split_artists(actual_artist)
+
+    if not expected_list or not actual_list:
+        return True  # 缺少一方信息时不做歌手校验
+
+    # 数量必须相同
+    if len(expected_list) != len(actual_list):
+        return False
+
+    # 贪心匹配：每个 expected 必须找到唯一的 actual 匹配
+    used = [False] * len(actual_list)
+    for exp in expected_list:
+        found = False
+        for j, act in enumerate(actual_list):
+            if used[j]:
+                continue
+            if _similarity(exp, act) >= _MIN_ARTIST_SIMILARITY:
+                used[j] = True
+                found = True
+                break
+        if not found:
+            return False
+    return True
+
+
+def _duration_ok(expected_duration: float, actual_duration: float) -> bool:
+    """
+    校验时长是否在容差范围内（±5秒）。
+    expected_duration 为 0 时表示不校验（未知时长）。
+    actual_duration 为 0 时表示平台未提供时长，跳过校验。
+    """
+    if expected_duration <= 0 or actual_duration <= 0:
+        return True
+    return abs(expected_duration - actual_duration) <= _DURATION_TOLERANCE
+
+
 def _is_match(
     expected_title: str, actual_title: str,
     expected_artist: str = "", actual_artist: str = "",
 ) -> bool:
-    """校验搜索结果的歌曲是否与目标匹配"""
+    """
+    校验搜索结果的歌曲是否与目标匹配：
+    - 标题相似度 >= 0.8（保留括号修饰信息参与比较）
+    - 歌手：多歌手时允许顺序不同，但不允许多/少/不同
+    """
     title_sim = _similarity(_normalize(expected_title), _normalize(actual_title))
     if title_sim < _MIN_TITLE_SIMILARITY:
         return False
     if expected_artist and actual_artist:
-        artist_sim = _similarity(
-            _normalize(expected_artist), _normalize(actual_artist)
-        )
-        if artist_sim < _MIN_ARTIST_SIMILARITY:
+        if not _artists_match(expected_artist, actual_artist):
             return False
     return True

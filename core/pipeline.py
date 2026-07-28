@@ -1,6 +1,7 @@
 """处理流程编排：加密解密 → 视频转音频 → 歌词搜索 → tag写入 → 人声分离 → 语音识别 → LRC 输出"""
 
 import os
+import shutil
 import requests
 from pathlib import Path
 from typing import Callable
@@ -8,6 +9,7 @@ from typing import Callable
 import zhconv
 
 from utils.audio_info import extract_info
+from utils.dep_installer import check_and_install
 from core.internet_search import search_lyrics, search_song_info
 from core.decryptor import is_encrypted, decrypt_audio
 from core.video_converter import is_video, convert_to_audio
@@ -37,6 +39,7 @@ def process_file(
     3. 写入 tag（标题/艺术家/专辑/封面）
     4. 若找到歌词 → 直接保存 LRC
     5. 若未找到 → 检查是否启用 Demucs/Whisper → 分离 + 识别 → 生成 LRC
+    6. 若设置了输出目录 → 移动成功文件到输出目录
     """
     cfg = config or {}
     whisper_model = cfg.get("whisper_model", "base")
@@ -45,24 +48,21 @@ def process_file(
     auto_convert = cfg.get("auto_convert_video", True)
     use_demucs = cfg.get("use_demucs", False)
     use_whisper = cfg.get("use_whisper", False)
-    decrypt_output_dir = cfg.get("decrypt_output_dir", None) or None
+    output_dir = cfg.get("output_dir", None) or None
     delete_source = cfg.get("delete_source_after_convert", False)
 
     # ── Step -1: 加密文件解密 ─────────────────────────────────────────────
     if is_encrypted(audio_path):
-        progress_callback(2, f"检测到加密音频，正在解密...")
+        progress_callback(2, "检测到加密音频，正在解密...")
         try:
             original_path = audio_path
             audio_path = decrypt_audio(
                 audio_path,
-                output_dir=decrypt_output_dir,
+                output_dir=output_dir,
                 progress_callback=progress_callback,
             )
             progress_callback(7, f"解密完成: {Path(audio_path).name}")
-            # 若启用删除源文件，删除原加密文件
-            if delete_source and os.path.exists(original_path):
-                os.remove(original_path)
-                progress_callback(8, f"已删除源文件: {Path(original_path).name}")
+            _try_delete_source(delete_source, original_path, progress_callback)
         except Exception as e:
             progress_callback(100, f"加密音频解密失败: {e}")
             return f"加密音频解密失败: {e}"
@@ -70,15 +70,14 @@ def process_file(
     # ── Step 0: 视频转音频 ────────────────────────────────────────────────
     if is_video(audio_path):
         if auto_convert:
-            progress_callback(3, f"检测到视频文件，正在提取音轨...")
+            if not check_and_install(["imageio-ffmpeg"], progress_callback):
+                return "缺少 imageio-ffmpeg，无法进行视频转音频"
+            progress_callback(3, "检测到视频文件，正在提取音轨...")
             try:
                 original_path = audio_path
                 audio_path = convert_to_audio(audio_path)
                 progress_callback(8, f"音轨提取完成: {Path(audio_path).name}")
-                # 若启用删除源文件，删除原视频文件
-                if delete_source and os.path.exists(original_path):
-                    os.remove(original_path)
-                    progress_callback(9, f"已删除源文件: {Path(original_path).name}")
+                _try_delete_source(delete_source, original_path, progress_callback)
             except Exception as e:
                 progress_callback(100, f"视频转音频失败: {e}")
                 return f"视频转音频失败: {e}"
@@ -91,14 +90,17 @@ def process_file(
     lrc_path = get_lrc_path(audio_path)
     filename = Path(audio_path).name
 
+    # 获取音频时长（用于搜索匹配校验）
+    audio_duration = _get_audio_duration(audio_path)
+
     # ── Step 2: 联网搜索歌词 + 专辑/封面 ──────────────────────────────────
     progress_callback(18, f"正在联网搜索歌词: {title} - {artist}")
-    search_result = search_lyrics(title, artist, providers=providers)
+    search_result = search_lyrics(title, artist, providers=providers, duration=audio_duration)
 
     if not search_result:
         for alt_title, alt_artist in alternates:
             progress_callback(18, f"尝试备选: {alt_title} - {alt_artist}")
-            search_result = search_lyrics(alt_title, alt_artist, providers=providers)
+            search_result = search_lyrics(alt_title, alt_artist, providers=providers, duration=audio_duration)
             if search_result:
                 title, artist = alt_title, alt_artist
                 break
@@ -115,7 +117,7 @@ def process_file(
     if not song_info.get("album") and not song_info.get("cover_url") \
             and not song_info.get("matched_title"):
         progress_callback(30, "正在搜索专辑信息...")
-        extra_info = search_song_info(title, artist, providers=providers)
+        extra_info = search_song_info(title, artist, providers=providers, duration=audio_duration)
         if extra_info:
             song_info.update({k: v for k, v in extra_info.items() if v})
 
@@ -161,8 +163,10 @@ def process_file(
         official_lrc = zhconv.convert(official_lrc, "zh-cn")
         progress_callback(85, f"找到官方歌词（来源: {source}），正在保存...")
         save_lrc(official_lrc, lrc_path)
+        # 移动到输出目录
+        final_path = _move_to_output(audio_path, lrc_path, output_dir, progress_callback)
         progress_callback(100, f"完成（官方歌词 · {source}）: {filename}")
-        return f"完成（官方歌词 · {source}）→ {lrc_path}"
+        return f"完成（官方歌词 · {source}）→ {final_path}"
 
     # ── Step 5: 未找到官方歌词 → 可选 Demucs + Whisper ───────────────────
     if not use_demucs and not use_whisper:
@@ -171,6 +175,17 @@ def process_file(
         return f"{msg}: {filename}"
 
     progress_callback(45, "未找到官方歌词，准备语音识别...")
+
+    # 检查并安装依赖
+    deps_needed = []
+    if use_demucs:
+        deps_needed.append("demucs")
+    if use_whisper:
+        deps_needed.append("faster-whisper")
+    if deps_needed:
+        progress_callback(46, f"正在检查依赖: {', '.join(deps_needed)}...")
+        if not check_and_install(deps_needed, progress_callback):
+            return f"依赖安装失败（{', '.join(deps_needed)}），无法进行语音识别"
 
     # 人声分离（仅在启用时执行）
     vocals_path = audio_path
@@ -204,4 +219,65 @@ def process_file(
     save_lrc(lrc_content, lrc_path)
     progress_callback(95, f"LRC 已保存: {lrc_path}")
 
-    return f"完成（Whisper 识别 · {whisper_model}）→ {lrc_path}"
+    # 移动到输出目录
+    final_path = _move_to_output(audio_path, lrc_path, output_dir, progress_callback)
+
+    return f"完成（Whisper 识别 · {whisper_model}）→ {final_path}"
+
+
+def _move_to_output(
+    audio_path: str,
+    lrc_path: str,
+    output_dir: str | None,
+    progress_callback: Callable[[int, str], None],
+) -> str:
+    """
+    若设置了输出目录，将音频文件和 LRC 文件移动到输出目录。
+
+    返回: 最终文件路径（用于显示）
+    """
+    if not output_dir:
+        return lrc_path
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    final_lrc = lrc_path
+    try:
+        # 移动音频文件
+        src_audio = Path(audio_path)
+        if src_audio.exists():
+            dst_audio = out_dir / src_audio.name
+            shutil.move(str(src_audio), str(dst_audio))
+
+        # 移动 LRC 文件
+        src_lrc = Path(lrc_path)
+        if src_lrc.exists():
+            dst_lrc = out_dir / src_lrc.name
+            shutil.move(str(src_lrc), str(dst_lrc))
+            final_lrc = str(dst_lrc)
+
+        progress_callback(98, f"已移动到输出目录: {out_dir.name}/")
+    except Exception as e:
+        progress_callback(98, f"移动到输出目录失败: {e}")
+
+    return final_lrc
+
+
+def _get_audio_duration(audio_path: str) -> float:
+    """获取音频文件时长（秒），失败返回 0"""
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(audio_path)
+        if audio and audio.info and hasattr(audio.info, "length"):
+            return float(audio.info.length)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _try_delete_source(enabled: bool, path: str, progress_callback: Callable[[int, str], None]) -> None:
+    """若启用删除源文件，删除指定路径的文件"""
+    if enabled and os.path.exists(path):
+        os.remove(path)
+        progress_callback(9, f"已删除源文件: {Path(path).name}")

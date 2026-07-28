@@ -1,22 +1,108 @@
-"""GUI 统一样式常量：颜色、字体、间距、按钮样式（字体延迟初始化）"""
+"""GUI 统一样式常量：颜色、字体、间距、按钮样式（支持亮/暗主题切换）"""
+
+import json
+from pathlib import Path
 
 import customtkinter as ctk
 
-# ── 全局主题 ──────────────────────────────────────────────────────────────────
-APPEARANCE = "dark"           # "dark" | "light" | "system"
-COLOR_THEME = "blue"          # "blue" | "green" | "dark-blue"
+# ── 用户设置文件路径 ──────────────────────────────────────────────────────────
+_USER_SETTINGS_FILE = Path(__file__).resolve().parent.parent / "user_settings.json"
 
-# ── 颜色 ──────────────────────────────────────────────────────────────────────
-BG_MAIN = "#1e1e2e"           # 主背景（深色）
-BG_PANEL = "#2a2a3d"          # 面板背景
-BG_INPUT = "#363650"          # 输入框/下拉框背景
-FG_PRIMARY = "#e4e4f0"        # 主文字颜色
-FG_SECONDARY = "#9999b8"      # 次要文字/提示
-FG_ACCENT = "#6c8cff"         # 强调色（按钮、链接）
-FG_SUCCESS = "#4ade80"        # 成功状态
-FG_WARNING = "#fbbf24"        # 警告/处理中状态
-FG_ERROR = "#f87171"          # 错误/失败状态
-FG_DISABLED = "#555570"       # 禁用状态
+# ── 主题颜色方案 ──────────────────────────────────────────────────────────────
+
+DARK_THEME = {
+    "appearance": "dark",
+    "color_theme": "blue",
+    "BG_MAIN": "#1e1e2e",
+    "BG_PANEL": "#2a2a3d",
+    "BG_INPUT": "#363650",
+    "FG_PRIMARY": "#e4e4f0",
+    "FG_SECONDARY": "#9999b8",
+    "FG_ACCENT": "#6c8cff",
+    "FG_SUCCESS": "#4ade80",
+    "FG_WARNING": "#fbbf24",
+    "FG_ERROR": "#f87171",
+    "FG_DISABLED": "#555570",
+}
+
+LIGHT_THEME = {
+    "appearance": "light",
+    "color_theme": "blue",
+    "BG_MAIN": "#f0f0f5",
+    "BG_PANEL": "#ffffff",
+    "BG_INPUT": "#e4e4ec",
+    "FG_PRIMARY": "#1a1a2e",
+    "FG_SECONDARY": "#5c5c7a",
+    "FG_ACCENT": "#4a6cf7",
+    "FG_SUCCESS": "#16a34a",
+    "FG_WARNING": "#d97706",
+    "FG_ERROR": "#dc2626",
+    "FG_DISABLED": "#a0a0b8",
+}
+
+_THEMES = {"dark": DARK_THEME, "light": LIGHT_THEME}
+
+# ── 当前激活的颜色变量（模块级，供外部 import 使用）──────────────────────────
+APPEARANCE = "dark"
+COLOR_THEME = "blue"
+BG_MAIN = DARK_THEME["BG_MAIN"]
+BG_PANEL = DARK_THEME["BG_PANEL"]
+BG_INPUT = DARK_THEME["BG_INPUT"]
+FG_PRIMARY = DARK_THEME["FG_PRIMARY"]
+FG_SECONDARY = DARK_THEME["FG_SECONDARY"]
+FG_ACCENT = DARK_THEME["FG_ACCENT"]
+FG_SUCCESS = DARK_THEME["FG_SUCCESS"]
+FG_WARNING = DARK_THEME["FG_WARNING"]
+FG_ERROR = DARK_THEME["FG_ERROR"]
+FG_DISABLED = DARK_THEME["FG_DISABLED"]
+
+
+def apply_theme(theme_name: str) -> None:
+    """应用指定主题，更新模块级颜色变量"""
+    global APPEARANCE, COLOR_THEME
+    global BG_MAIN, BG_PANEL, BG_INPUT
+    global FG_PRIMARY, FG_SECONDARY, FG_ACCENT
+    global FG_SUCCESS, FG_WARNING, FG_ERROR, FG_DISABLED
+
+    theme = _THEMES.get(theme_name, DARK_THEME)
+    APPEARANCE = theme["appearance"]
+    COLOR_THEME = theme["color_theme"]
+    BG_MAIN = theme["BG_MAIN"]
+    BG_PANEL = theme["BG_PANEL"]
+    BG_INPUT = theme["BG_INPUT"]
+    FG_PRIMARY = theme["FG_PRIMARY"]
+    FG_SECONDARY = theme["FG_SECONDARY"]
+    FG_ACCENT = theme["FG_ACCENT"]
+    FG_SUCCESS = theme["FG_SUCCESS"]
+    FG_WARNING = theme["FG_WARNING"]
+    FG_ERROR = theme["FG_ERROR"]
+    FG_DISABLED = theme["FG_DISABLED"]
+
+
+def load_theme() -> str:
+    """从 user_settings.json 读取主题设置，返回 'dark' 或 'light'"""
+    try:
+        if _USER_SETTINGS_FILE.exists():
+            data = json.loads(_USER_SETTINGS_FILE.read_text(encoding="utf-8"))
+            return data.get("theme", "dark")
+    except Exception:
+        pass
+    return "dark"
+
+
+def save_theme(theme_name: str) -> None:
+    """将主题设置写入 user_settings.json"""
+    data = {}
+    try:
+        if _USER_SETTINGS_FILE.exists():
+            data = json.loads(_USER_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    data["theme"] = theme_name
+    _USER_SETTINGS_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
 
 # ── 字体族名 ──────────────────────────────────────────────────────────────────
 FONT_FAMILY = "Microsoft YaHei UI"  # 微软雅黑

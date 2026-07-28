@@ -1,17 +1,17 @@
 """Whisper 语音识别：将音频转换为带时间戳的文本段落"""
 
-from faster_whisper import WhisperModel
-
 # 模块级模型缓存，避免重复加载
-_model: WhisperModel | None = None
+_model = None
 _model_name: str | None = None
 
 
-def _get_model(model_name: str) -> WhisperModel:
+def _get_model(model_name: str):
     """获取或缓存 WhisperModel 实例"""
     global _model, _model_name
     if _model is not None and _model_name == model_name:
         return _model
+
+    from faster_whisper import WhisperModel
 
     # 自动检测设备
     try:

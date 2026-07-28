@@ -1,4 +1,4 @@
-"""设置面板：Whisper/Demucs 模型选择、歌词来源、功能开关、解密设置"""
+"""设置面板：功能开关、输出目录、模型选择、歌词来源、歌手头像、主题切换"""
 
 import customtkinter as ctk
 from tkinter import filedialog
@@ -14,13 +14,14 @@ from config import (
 class SettingsPanel(ctk.CTkFrame):
     """右侧设置面板"""
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, on_artist_scan=None, **kwargs):
         super().__init__(
             master,
             fg_color=S.BG_PANEL,
             corner_radius=S.CORNER_RADIUS,
             **kwargs,
         )
+        self._on_artist_scan = on_artist_scan
         self._build_ui()
 
     # ── 公开接口 ──────────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ class SettingsPanel(ctk.CTkFrame):
             "auto_convert_video": self._auto_convert_var.get(),
             "use_demucs": self._use_demucs_var.get(),
             "use_whisper": self._use_whisper_var.get(),
-            "decrypt_output_dir": self._decrypt_dir_var.get().strip(),
+            "output_dir": self._output_dir_var.get().strip(),
             "delete_source_after_convert": self._delete_source_var.get(),
         }
 
@@ -87,17 +88,17 @@ class SettingsPanel(ctk.CTkFrame):
             fg_color=S.FG_ACCENT,
         ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
 
-        # 解密输出目录
+        # 输出目录
         ctk.CTkLabel(
-            scroll, text="解密输出目录（留空则输出到源文件同目录）",
+            scroll, text="输出目录（留空则保留在源文件同目录）",
             font=S.get_font_small(), text_color=S.FG_SECONDARY,
         ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 2))
         dir_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         dir_frame.pack(fill="x", padx=pad + 10)
-        self._decrypt_dir_var = ctk.StringVar(value="")
+        self._output_dir_var = ctk.StringVar(value="")
         ctk.CTkEntry(
             dir_frame,
-            textvariable=self._decrypt_dir_var,
+            textvariable=self._output_dir_var,
             placeholder_text="留空 = 源文件同目录",
             font=S.get_font_body(),
             fg_color=S.BG_INPUT,
@@ -105,63 +106,34 @@ class SettingsPanel(ctk.CTkFrame):
         ).pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
             dir_frame, text="浏览", width=50,
-            command=self._browse_decrypt_dir,
+            command=self._browse_output_dir,
             **S.SECONDARY_BTN(),
         ).pack(side="left", padx=(6, 0))
 
         # 分割线
         ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=(S.PAD_BETWEEN, S.PAD_BETWEEN))
 
-        # 启用 Demucs
-        self._use_demucs_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
+        # ── 歌手信息 ──────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            scroll, text="歌手信息", font=S.get_font_body(), text_color=S.FG_SECONDARY
+        ).pack(anchor="w", padx=pad)
+        ctk.CTkButton(
             scroll,
-            text="启用 Demucs 人声分离",
-            variable=self._use_demucs_var,
+            text="🎤 联网搜索获取歌手头像",
+            command=self._handle_artist_scan,
             font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
-            command=self._on_demucs_toggle,
-        ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
+            **S.PRIMARY_BTN(),
+        ).pack(fill="x", padx=pad + 10, pady=(6, 0))
         ctk.CTkLabel(
             scroll,
-            text="ℹ️ 需要下载模型，分离可大大提升识别准确率",
-            font=S.get_font_small(), text_color=S.FG_WARNING,
-        ).pack(anchor="w", padx=pad + 10)
-
-        # Demucs 模型下拉
-        self._demucs_var = ctk.StringVar(value=DEFAULT_DEMUCS_MODEL)
-        self._demucs_dropdown = self._add_dropdown(
-            scroll, "Demucs 模型", DEMUCS_MODELS, self._demucs_var, disabled=True
-        )
-
-        # 启用 Whisper
-        self._use_whisper_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            scroll,
-            text="启用 Whisper 语音识别",
-            variable=self._use_whisper_var,
-            font=S.get_font_body(),
-            text_color=S.FG_PRIMARY,
-            fg_color=S.FG_ACCENT,
-            command=self._on_whisper_toggle,
-        ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 0))
-        ctk.CTkLabel(
-            scroll,
-            text="ℹ️ 需要下载模型，语音识别可能不准确",
-            font=S.get_font_small(), text_color=S.FG_WARNING,
-        ).pack(anchor="w", padx=pad + 10)
-
-        # Whisper 模型下拉
-        self._whisper_var = ctk.StringVar(value=DEFAULT_WHISPER_MODEL)
-        self._whisper_dropdown = self._add_dropdown(
-            scroll, "Whisper 模型", WHISPER_MODELS, self._whisper_var, disabled=True
-        )
+            text="选择音乐库文件夹，自动扫描歌手并下载头像",
+            font=S.get_font_small(), text_color=S.FG_SECONDARY,
+        ).pack(anchor="w", padx=pad + 10, pady=(2, 0))
 
         # 分割线
         ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
 
-        # 歌词来源勾选框
+        # ── 联网搜索来源 ──────────────────────────────────────────────────
         ctk.CTkLabel(
             scroll, text="联网搜索来源", font=S.get_font_small(), text_color=S.FG_SECONDARY
         ).pack(anchor="w", padx=pad)
@@ -181,14 +153,66 @@ class SettingsPanel(ctk.CTkFrame):
         # 分割线
         ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
 
-    # ── 目录浏览 ────────────────────────────────────────────────────────────
+        # ── 启用 Demucs ───────────────────────────────────────────────────
+        self._use_demucs_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            scroll,
+            text="启用 Demucs 人声分离",
+            variable=self._use_demucs_var,
+            font=S.get_font_body(),
+            text_color=S.FG_PRIMARY,
+            fg_color=S.FG_ACCENT,
+            command=self._on_demucs_toggle,
+        ).pack(anchor="w", padx=pad + 10, pady=(4, 0))
+        ctk.CTkLabel(
+            scroll,
+            text="ℹ️ 首次启用时自动下载安装，分离可大大提升识别准确率",
+            font=S.get_font_small(), text_color=S.FG_WARNING,
+        ).pack(anchor="w", padx=pad + 10)
 
-    def _browse_decrypt_dir(self) -> None:
-        folder = filedialog.askdirectory(title="选择解密输出目录")
+        # Demucs 模型下拉
+        self._demucs_var = ctk.StringVar(value=DEFAULT_DEMUCS_MODEL)
+        self._demucs_dropdown = self._add_dropdown(
+            scroll, "Demucs 模型", DEMUCS_MODELS, self._demucs_var, disabled=True
+        )
+
+        # ── 启用 Whisper ──────────────────────────────────────────────────
+        self._use_whisper_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            scroll,
+            text="启用 Whisper 语音识别",
+            variable=self._use_whisper_var,
+            font=S.get_font_body(),
+            text_color=S.FG_PRIMARY,
+            fg_color=S.FG_ACCENT,
+            command=self._on_whisper_toggle,
+        ).pack(anchor="w", padx=pad + 10, pady=(S.PAD_BETWEEN, 0))
+        ctk.CTkLabel(
+            scroll,
+            text="ℹ️ 首次启用时自动下载安装，语音识别可能不准确",
+            font=S.get_font_small(), text_color=S.FG_WARNING,
+        ).pack(anchor="w", padx=pad + 10)
+
+        # Whisper 模型下拉
+        self._whisper_var = ctk.StringVar(value=DEFAULT_WHISPER_MODEL)
+        self._whisper_dropdown = self._add_dropdown(
+            scroll, "Whisper 模型", WHISPER_MODELS, self._whisper_var, disabled=True
+        )
+
+        # 底部分割线
+        ctk.CTkFrame(scroll, fg_color=S.BG_INPUT, height=1).pack(fill="x", padx=pad, pady=S.PAD_SECTION)
+
+    # ── 事件处理 ──────────────────────────────────────────────────────────────
+
+    def _browse_output_dir(self) -> None:
+        folder = filedialog.askdirectory(title="选择输出目录")
         if folder:
-            self._decrypt_dir_var.set(folder)
+            self._output_dir_var.set(folder)
 
-    # ── 下拉框启用/禁用联动 ────────────────────────────────────────────────
+    def _handle_artist_scan(self) -> None:
+        folder = filedialog.askdirectory(title="选择音乐库文件夹")
+        if folder and self._on_artist_scan:
+            self._on_artist_scan(folder)
 
     def _on_demucs_toggle(self) -> None:
         state = "normal" if self._use_demucs_var.get() else "disabled"

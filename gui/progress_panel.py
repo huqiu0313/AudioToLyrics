@@ -67,23 +67,23 @@ class ProgressPanel(ctk.CTkFrame):
         )
         self._exit_btn.pack(side="right")
 
-        # ── 标题行 + 批量进度 ──
+        # ── 标题行 + 批量进度（醒目显示）──
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=pad, pady=(pad, 0))
         ctk.CTkLabel(top, text="📊 处理进度", font=S.get_font_heading(), text_color=S.FG_PRIMARY).pack(side="left")
         self._batch_label = ctk.CTkLabel(
-            top, text="批量进度: 0/0", font=S.get_font_small(), text_color=S.FG_SECONDARY
+            top, text="批量进度: 0/0", font=S.get_font_heading(), text_color=S.FG_ACCENT
         )
         self._batch_label.pack(side="right")
 
-        # ── 进度条行 ──
+        # ── 进度条行（加粗）──
         bar_row = ctk.CTkFrame(self, fg_color="transparent")
         bar_row.pack(fill="x", padx=pad, pady=(S.PAD_BETWEEN, 0))
-        self._progress_bar = ctk.CTkProgressBar(bar_row, height=12, corner_radius=6)
+        self._progress_bar = ctk.CTkProgressBar(bar_row, height=18, corner_radius=9)
         self._progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self._progress_bar.set(0)
         self._progress_label = ctk.CTkLabel(
-            bar_row, text="0%", font=S.get_font_small(), text_color=S.FG_ACCENT, width=40
+            bar_row, text="0%", font=S.get_font_body(), text_color=S.FG_ACCENT, width=44
         )
         self._progress_label.pack(side="right")
 

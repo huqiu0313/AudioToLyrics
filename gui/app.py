@@ -1,5 +1,7 @@
 """主窗口：组装所有面板，协调各组件，启动批量处理"""
 
+import threading
+
 import customtkinter as ctk
 
 from config import WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
@@ -9,10 +11,11 @@ from gui.settings_panel import SettingsPanel
 from gui.progress_panel import ProgressPanel
 from utils.thread_worker import BatchWorker
 from core.pipeline import process_file
+from core.artist_image import fetch_artist_images
 
 
 class App(ctk.CTk):
-    """AudioToLyrics v3 主应用窗口"""
+    """AudioToLyrics v5 主应用窗口"""
 
     def __init__(self):
         super().__init__()
@@ -23,6 +26,10 @@ class App(ctk.CTk):
     # ── 窗口配置 ──────────────────────────────────────────────────────────────
 
     def _setup_window(self) -> None:
+        # 加载并应用用户主题
+        theme_name = S.load_theme()
+        S.apply_theme(theme_name)
+
         ctk.set_appearance_mode(S.APPEARANCE)
         ctk.set_default_color_theme(S.COLOR_THEME)
         self.title(WINDOW_TITLE)
@@ -30,7 +37,7 @@ class App(ctk.CTk):
         self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.configure(fg_color=S.BG_MAIN)
 
-    # ── 布局组装 ──────────────────────────────────────────────────────────────
+    # ── 布局组装（左右分栏）────────────────────────────────────────────────────
 
     def _build_layout(self) -> None:
         pad = S.PAD_OUTER
@@ -40,48 +47,103 @@ class App(ctk.CTk):
         title_frame.pack(fill="x", padx=pad, pady=(pad, 0))
         ctk.CTkLabel(
             title_frame,
-            text="🎵 AudioToLyrics v4",
+            text="🎵 AudioToLyrics v5",
             font=S.get_font_title(),
             text_color=S.FG_PRIMARY,
         ).pack(side="left")
         ctk.CTkLabel(
             title_frame,
-            text="联网搜索，Demucs + Whisper 智能歌词识别",
+            text="联网搜索 · Demucs + Whisper · 歌手头像",
             font=S.get_font_small(),
             text_color=S.FG_SECONDARY,
         ).pack(side="left", padx=(16, 0))
 
-        # 主容器（grid 布局）
+        # 右上角主题切换
+        self._theme_var = ctk.StringVar(value="暗色" if S.load_theme() == "dark" else "亮色")
+        ctk.CTkOptionMenu(
+            title_frame,
+            values=["暗色", "亮色"],
+            variable=self._theme_var,
+            font=S.get_font_small(),
+            width=80,
+            height=28,
+            fg_color=S.BG_INPUT,
+            button_color=S.FG_ACCENT,
+            button_hover_color=S.FG_ACCENT,
+            text_color=S.FG_PRIMARY,
+            dropdown_fg_color=S.BG_PANEL,
+            dropdown_text_color=S.FG_PRIMARY,
+            dropdown_hover_color=S.BG_INPUT,
+            command=self._on_theme_change,
+        ).pack(side="right")
+        ctk.CTkLabel(
+            title_frame,
+            text="主题重启后生效",
+            font=S.get_font_small(),
+            text_color=S.FG_SECONDARY,
+        ).pack(side="right", padx=(0, 8))
+
+        # 主容器（grid 布局：左列 + 右列）
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=pad, pady=(pad // 2, pad))
-        main_frame.rowconfigure(0, weight=2)
-        main_frame.rowconfigure(1, weight=3)
-        main_frame.columnconfigure(0, weight=3)
+        main_frame.columnconfigure(0, weight=3)   # 左列
+        main_frame.columnconfigure(1, weight=2)   # 右列
+        main_frame.rowconfigure(0, weight=1)
 
-        # ── 上半区：文件面板 + 设置面板 ──
-        top_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        top_frame.grid(row=0, column=0, sticky="nsew", pady=(0, pad // 2))
-        top_frame.columnconfigure(0, weight=3)
-        top_frame.columnconfigure(1, weight=2)
-        top_frame.rowconfigure(0, weight=1)
+        # ── 左列：文件面板（上）+ 进度面板（下）──
+        left_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, pad // 2))
+        left_frame.rowconfigure(0, weight=2)   # 文件面板
+        left_frame.rowconfigure(1, weight=3)   # 进度面板
+        left_frame.columnconfigure(0, weight=1)
 
-        self._file_panel = FilePanel(top_frame)
-        self._file_panel.grid(row=0, column=0, sticky="nsew", padx=(0, pad // 2))
-
-        self._settings_panel = SettingsPanel(top_frame)
-        self._settings_panel.grid(row=0, column=1, sticky="nsew", padx=(pad // 2, 0))
-
-        # ── 下半区：进度面板 ──
-        bottom_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        bottom_frame.grid(row=1, column=0, sticky="nsew", pady=(pad // 2, 0))
+        self._file_panel = FilePanel(left_frame)
+        self._file_panel.grid(row=0, column=0, sticky="nsew", pady=(0, pad // 2))
 
         self._progress_panel = ProgressPanel(
-            bottom_frame,
+            left_frame,
             on_start=self._start_processing,
             on_stop=self._stop_processing,
             on_exit=self._exit,
         )
-        self._progress_panel.pack(fill="both", expand=True)
+        self._progress_panel.grid(row=1, column=0, sticky="nsew", pady=(pad // 2, 0))
+
+        # ── 右列：设置面板（全高）──
+        self._settings_panel = SettingsPanel(
+            main_frame,
+            on_artist_scan=self._start_artist_scan,
+        )
+        self._settings_panel.grid(row=0, column=1, sticky="nsew", padx=(pad // 2, 0))
+
+    # ── 主题切换 ──────────────────────────────────────────────────────────────
+
+    def _on_theme_change(self, value: str) -> None:
+        theme_name = "dark" if value == "暗色" else "light"
+        S.save_theme(theme_name)
+
+    # ── 歌手头像扫描 ──────────────────────────────────────────────────────────
+
+    def _start_artist_scan(self, folder: str) -> None:
+        """在后台线程中执行歌手头像扫描，进度输出到日志区"""
+        self._progress_panel.append_log(f"[歌手头像] 开始扫描: {folder}")
+
+        def _run():
+            def _on_progress(percent: int, message: str):
+                self.after(0, lambda: self._progress_panel.append_log(f"[歌手头像] {message}"))
+
+            try:
+                result = fetch_artist_images(folder, progress_callback=_on_progress)
+                summary = (
+                    f"[歌手头像] 完成 — 成功: {len(result['success'])}, "
+                    f"跳过: {len(result['skipped'])}, "
+                    f"失败: {len(result['failed'])}"
+                )
+                self.after(0, lambda: self._progress_panel.append_log(summary))
+            except Exception as e:
+                self.after(0, lambda: self._progress_panel.append_log(f"[歌手头像] 错误: {e}"))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
     # ── 处理逻辑 ──────────────────────────────────────────────────────────────
 
@@ -94,10 +156,9 @@ class App(ctk.CTk):
         config = self._settings_panel.get_config()
         self._progress_panel.set_running(True)
         self._progress_panel.append_log(f"[开始] 共 {len(files)} 个文件待处理")
-        self._success_paths: set[str] = set()  # 跟踪成功的文件路径
+        self._success_paths: set[str] = set()
 
         def _on_progress(file_index, total, percent, message, status):
-            # 在主线程中更新 UI（通过 after 调度）
             self.after(0, lambda: self._handle_progress(file_index, total, percent, message, status))
 
         self._worker = BatchWorker(
