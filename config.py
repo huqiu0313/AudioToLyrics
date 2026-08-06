@@ -1,4 +1,4 @@
-"""全局配置常量"""
+"""全局配置常量 — AudioToLyrics v5.1"""
 
 # 支持的音频文件格式
 SUPPORTED_FORMATS = (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aac", ".wma")
