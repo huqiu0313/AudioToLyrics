@@ -34,3 +34,8 @@ Thumbs.db
 
 # unlock-music CLI 二进制文件（首次使用时自动下载）
 tools/um.exe
+
+fix.py
+album_artist.py
+rename_music.py
+

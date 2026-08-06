@@ -22,7 +22,7 @@ from config import (
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
-def is_encrypted(file_path: str) -> bool:
+def is_encrypted(file_path: str | Path) -> bool:
     """判断文件是否为加密音频格式"""
     return Path(file_path).suffix.lower() in ENCRYPTED_FORMATS
 
@@ -86,8 +86,8 @@ def ensure_um_cli(
 
 
 def decrypt_audio(
-    file_path: str,
-    output_dir: str | None = None,
+    file_path: str | Path,
+    output_dir: str | Path | None = None,
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> str:
     """

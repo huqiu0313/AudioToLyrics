@@ -64,14 +64,14 @@ def process_file(
             progress_callback(7, f"解密完成: {Path(audio_path).name}")
             _try_delete_source(delete_source, original_path, progress_callback)
         except Exception as e:
-            progress_callback(100, f"加密音频解密失败: {e}")
-            return f"加密音频解密失败: {e}"
+            ext = Path(audio_path).suffix.lower()
+            raise RuntimeError(f"歌曲解码失败，文件格式为{ext}: {e}") from e
 
     # ── Step 0: 视频转音频 ────────────────────────────────────────────────
     if is_video(audio_path):
         if auto_convert:
             if not check_and_install(["imageio-ffmpeg"], progress_callback):
-                return "缺少 imageio-ffmpeg，无法进行视频转音频"
+                raise RuntimeError("缺少 imageio-ffmpeg，无法进行视频转音频")
             progress_callback(3, "检测到视频文件，正在提取音轨...")
             try:
                 original_path = audio_path
@@ -79,10 +79,9 @@ def process_file(
                 progress_callback(8, f"音轨提取完成: {Path(audio_path).name}")
                 _try_delete_source(delete_source, original_path, progress_callback)
             except Exception as e:
-                progress_callback(100, f"视频转音频失败: {e}")
-                return f"视频转音频失败: {e}"
+                raise RuntimeError(f"视频转音频失败: {e}") from e
         else:
-            return f"跳过视频文件（未启用自动转换）: {Path(audio_path).name}"
+            raise RuntimeError(f"跳过视频文件（未启用自动转换）: {Path(audio_path).name}")
 
     # ── Step 1: 提取歌曲信息 ──────────────────────────────────────────────
     progress_callback(10, "正在读取歌曲信息...")
@@ -90,17 +89,14 @@ def process_file(
     lrc_path = get_lrc_path(audio_path)
     filename = Path(audio_path).name
 
-    # 获取音频时长（用于搜索匹配校验）
-    audio_duration = _get_audio_duration(audio_path)
-
     # ── Step 2: 联网搜索歌词 + 专辑/封面 ──────────────────────────────────
     progress_callback(18, f"正在联网搜索歌词: {title} - {artist}")
-    search_result = search_lyrics(title, artist, providers=providers, duration=audio_duration)
+    search_result = search_lyrics(title, artist, providers=providers)
 
     if not search_result:
         for alt_title, alt_artist in alternates:
             progress_callback(18, f"尝试备选: {alt_title} - {alt_artist}")
-            search_result = search_lyrics(alt_title, alt_artist, providers=providers, duration=audio_duration)
+            search_result = search_lyrics(alt_title, alt_artist, providers=providers)
             if search_result:
                 title, artist = alt_title, alt_artist
                 break
@@ -115,9 +111,9 @@ def process_file(
 
     # 若歌词搜索未返回专辑/封面，独立搜索一次
     if not song_info.get("album") and not song_info.get("cover_url") \
-            and not song_info.get("matched_title"):
+            and not song_info.get("matched_title") and not song_info.get("matched_artist"):
         progress_callback(30, "正在搜索专辑信息...")
-        extra_info = search_song_info(title, artist, providers=providers, duration=audio_duration)
+        extra_info = search_song_info(title, artist, providers=providers)
         if extra_info:
             song_info.update({k: v for k, v in extra_info.items() if v})
 
@@ -126,9 +122,12 @@ def process_file(
     tag_artist = song_info.get("matched_artist") or artist
 
     # ── Step 3: 下载封面 + 写入 tag ──────────────────────────────────────
+    # 检查音频文件是否已有专辑/封面标签，有则跳过
+    existing = _check_existing_tags(audio_path)
+
     cover_bytes = None
     cover_url = song_info.get("cover_url", "")
-    if cover_url:
+    if cover_url and not existing.get("cover"):
         progress_callback(35, "正在下载专辑封面...")
         try:
             # 根据域名自动加 Referer，绕过 CDN 防盗链
@@ -145,7 +144,7 @@ def process_file(
         except Exception:
             pass
 
-    album = song_info.get("album", "")
+    album = "" if existing.get("album") else song_info.get("album", "")
     progress_callback(38, "正在写入音频标签...")
     tag_result = write_tags(
         audio_path,
@@ -170,9 +169,9 @@ def process_file(
 
     # ── Step 5: 未找到官方歌词 → 可选 Demucs + Whisper ───────────────────
     if not use_demucs and not use_whisper:
-        msg = "未找到官方歌词，且未启用语音识别（Demucs/Whisper），跳过该文件"
+        msg = f"歌词匹配失败，匹配关键词为 {title} - {artist}，且未启用语音识别"
         progress_callback(100, msg)
-        return f"{msg}: {filename}"
+        raise RuntimeError(f"{msg}: {filename}")
 
     progress_callback(45, "未找到官方歌词，准备语音识别...")
 
@@ -185,7 +184,7 @@ def process_file(
     if deps_needed:
         progress_callback(46, f"正在检查依赖: {', '.join(deps_needed)}...")
         if not check_and_install(deps_needed, progress_callback):
-            return f"依赖安装失败（{', '.join(deps_needed)}），无法进行语音识别"
+            raise RuntimeError(f"依赖安装失败（{', '.join(deps_needed)}），无法进行语音识别")
 
     # 人声分离（仅在启用时执行）
     vocals_path = audio_path
@@ -198,16 +197,16 @@ def process_file(
 
     # Whisper 识别
     if not use_whisper:
-        msg = "未启用 Whisper，无法进行语音识别，跳过该文件"
+        msg = "未启用 Whisper，无法进行语音识别"
         progress_callback(100, msg)
-        return f"{msg}: {filename}"
+        raise RuntimeError(f"{msg}: {filename}")
 
     progress_callback(65, f"正在使用 Whisper ({whisper_model}) 识别歌词...")
     segments = transcribe(vocals_path, model_name=whisper_model)
 
     if not segments:
         progress_callback(100, f"未识别到任何歌词: {filename}")
-        return f"未识别到歌词: {filename}"
+        raise RuntimeError(f"未识别到歌词: {filename}")
 
     # 繁体转简体
     for seg in segments:
@@ -221,6 +220,8 @@ def process_file(
 
     # 移动到输出目录
     final_path = _move_to_output(audio_path, lrc_path, output_dir, progress_callback)
+    if not Path(final_path).exists():
+        raise RuntimeError(f"LRC 文件生成失败: {filename}")
 
     return f"完成（Whisper 识别 · {whisper_model}）→ {final_path}"
 
@@ -264,16 +265,38 @@ def _move_to_output(
     return final_lrc
 
 
-def _get_audio_duration(audio_path: str) -> float:
-    """获取音频文件时长（秒），失败返回 0"""
+def _check_existing_tags(audio_path: str) -> dict[str, bool]:
+    """检查音频文件是否已有专辑和封面标签，返回 {"album": bool, "cover": bool}"""
+    result = {"album": False, "cover": False}
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(audio_path)
-        if audio and audio.info and hasattr(audio.info, "length"):
-            return float(audio.info.length)
+        ext = Path(audio_path).suffix.lower()
+        if ext == ".mp3":
+            from mutagen.id3 import ID3, ID3NoHeaderError
+            try:
+                tags = ID3(audio_path)
+                result["album"] = bool(tags.get("TALB"))
+                result["cover"] = any(k.startswith("APIC") for k in tags.keys())
+            except ID3NoHeaderError:
+                pass
+        elif ext == ".flac":
+            from mutagen.flac import FLAC
+            audio = FLAC(audio_path)
+            result["album"] = bool(audio.get("album"))
+            result["cover"] = bool(audio.pictures)
+        elif ext == ".m4a":
+            from mutagen.mp4 import MP4
+            audio = MP4(audio_path)
+            if audio.tags:
+                result["album"] = bool(audio.tags.get("\xa9alb"))
+                result["cover"] = bool(audio.tags.get("covr"))
+        elif ext == ".ogg":
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(audio_path)
+            result["album"] = bool(audio.get("album"))
+            result["cover"] = bool(audio.get("metadata_block_picture"))
     except Exception:
         pass
-    return 0.0
+    return result
 
 
 def _try_delete_source(enabled: bool, path: str, progress_callback: Callable[[int, str], None]) -> None:

@@ -47,7 +47,7 @@ class App(ctk.CTk):
         title_frame.pack(fill="x", padx=pad, pady=(pad, 0))
         ctk.CTkLabel(
             title_frame,
-            text="🎵 AudioToLyrics v5",
+            text="🎵 AudioToLyrics v5.1",
             font=S.get_font_title(),
             text_color=S.FG_PRIMARY,
         ).pack(side="left")
@@ -197,14 +197,23 @@ class App(ctk.CTk):
         self._progress_panel.append_log(f"[{file_index}/{total}] {status_icon} {message}")
 
         # 更新文件列表状态
-        display_status = {
-            "processing": "处理中...",
-            "done": "完成",
-            "failed": "失败",
-            "cancelled": "已取消",
-        }.get(status, "")
-        if display_status:
-            self._file_panel.set_file_status(file_index, display_status)
+        if status == "failed":
+            # 提取详细失败原因：去掉 "失败: " 前缀，保留核心错误信息
+            reason = message
+            if reason.startswith("失败: "):
+                reason = reason[4:]
+            # 截断过长的错误信息
+            if len(reason) > 60:
+                reason = reason[:57] + "..."
+            self._file_panel.set_file_status(file_index, reason)
+        else:
+            display_status = {
+                "processing": "处理中...",
+                "done": "完成",
+                "cancelled": "已取消",
+            }.get(status, "")
+            if display_status:
+                self._file_panel.set_file_status(file_index, display_status)
 
         # 记录成功的文件路径
         if status == "done" and self._worker:

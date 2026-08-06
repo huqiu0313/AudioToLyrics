@@ -40,14 +40,21 @@ def _read_metadata(audio_path: str) -> tuple[str, str]:
 
         elif ext == ".flac":
             audio = FLAC(audio_path)
-            title = _first(audio.get("title", []))
-            artist = _first(audio.get("artist", []))
+            title = _join(audio.get("title", []))
+            artist = _join(audio.get("artist", []))
             return title, artist
 
         elif ext == ".m4a":
             audio = MP4(audio_path)
             title = _first(audio.tags.get("\xa9nam", []) if audio.tags else [])
             artist = _first(audio.tags.get("\xa9ART", []) if audio.tags else [])
+            return title, artist
+
+        elif ext == ".ogg":
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(audio_path)
+            title = _first(audio.get("title", []))
+            artist = _first(audio.get("artist", []))
             return title, artist
 
         else:
@@ -92,3 +99,10 @@ def _first(lst: list) -> str:
         return ""
     val = lst[0]
     return str(val).strip() if val else ""
+
+
+def _join(lst: list, sep: str = "/") -> str:
+    """将列表元素用分隔符拼接（如 FLAC 多歌手），空列表返回空字符串"""
+    if not lst:
+        return ""
+    return sep.join(str(v).strip() for v in lst if v)

@@ -27,6 +27,8 @@ def write_tags(
             _write_flac(audio_path, title, artist, album, cover_bytes, cover_mime, result)
         elif ext == ".m4a":
             _write_mp4(audio_path, title, artist, album, cover_bytes, cover_mime, result)
+        elif ext == ".ogg":
+            _write_ogg(audio_path, title, artist, album, cover_bytes, cover_mime, result)
     except Exception:
         pass
 
@@ -122,6 +124,42 @@ def _write_mp4(path, title, artist, album, cover_bytes, mime, result):
     if cover_bytes and not audio.tags.get("covr"):
         img_format = MP4Cover.FORMAT_JPEG if "jpeg" in mime else MP4Cover.FORMAT_PNG
         audio.tags["covr"] = [MP4Cover(cover_bytes, imageformat=img_format)]
+        result["cover"] = True
+
+    audio.save()
+
+
+# ── OGG (Vorbis Comments) ────────────────────────────────────────────────────
+
+
+def _write_ogg(path, title, artist, album, cover_bytes, mime, result):
+    from mutagen.oggvorbis import OggVorbis
+
+    audio = OggVorbis(path)
+
+    if title and not audio.get("title"):
+        audio["title"] = title
+        result["title"] = True
+
+    if artist and not audio.get("artist"):
+        audio["artist"] = artist
+        result["artist"] = True
+
+    if album and not audio.get("album"):
+        audio["album"] = album
+        result["album"] = True
+
+    # OGG 封面通过 METADATA_BLOCK_PICTURE 存储（base64 编码的 FLAC Picture）
+    if cover_bytes and not audio.get("metadata_block_picture"):
+        import base64
+        from mutagen.flac import Picture
+        pic = Picture()
+        pic.type = 3  # Cover (front)
+        pic.mime = mime
+        pic.desc = ""
+        pic.data = cover_bytes
+        pic_data = base64.b64encode(pic.write()).decode("ascii")
+        audio["metadata_block_picture"] = [pic_data]
         result["cover"] = True
 
     audio.save()
